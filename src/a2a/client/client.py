@@ -1,12 +1,10 @@
 import json
 import logging
-
 from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import uuid4
 
 import httpx
-
 from httpx_sse import SSEError, aconnect_sse
 from pydantic import ValidationError
 
@@ -28,7 +26,6 @@ from a2a.types import (
 )
 from a2a.utils.telemetry import SpanKind, trace_class
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +36,7 @@ class A2ACardResolver:
         self,
         httpx_client: httpx.AsyncClient,
         base_url: str,
-        agent_card_path: str = '/.well-known/agent.json',
+        agent_card_path: str = "/.well-known/agent.json",
     ):
         """Initializes the A2ACardResolver.
 
@@ -48,8 +45,8 @@ class A2ACardResolver:
             base_url: The base URL of the agent's host.
             agent_card_path: The path to the agent card endpoint, relative to the base URL.
         """
-        self.base_url = base_url.rstrip('/')
-        self.agent_card_path = agent_card_path.lstrip('/')
+        self.base_url = base_url.rstrip("/")
+        self.agent_card_path = agent_card_path.lstrip("/")
         self.httpx_client = httpx_client
 
     async def get_agent_card(
@@ -81,9 +78,9 @@ class A2ACardResolver:
             # Use the default public agent card path configured during initialization
             path_segment = self.agent_card_path
         else:
-            path_segment = relative_card_path.lstrip('/')
+            path_segment = relative_card_path.lstrip("/")
 
-        target_url = f'{self.base_url}/{path_segment}'
+        target_url = f"{self.base_url}/{path_segment}"
 
         try:
             response = await self.httpx_client.get(
@@ -93,7 +90,7 @@ class A2ACardResolver:
             response.raise_for_status()
             agent_card_data = response.json()
             logger.info(
-                'Successfully fetched agent card data from %s: %s',
+                "Successfully fetched agent card data from %s: %s",
                 target_url,
                 agent_card_data,
             )
@@ -101,20 +98,20 @@ class A2ACardResolver:
         except httpx.HTTPStatusError as e:
             raise A2AClientHTTPError(
                 e.response.status_code,
-                f'Failed to fetch agent card from {target_url}: {e}',
+                f"Failed to fetch agent card from {target_url}: {e}",
             ) from e
         except json.JSONDecodeError as e:
             raise A2AClientJSONError(
-                f'Failed to parse JSON for agent card from {target_url}: {e}'
+                f"Failed to parse JSON for agent card from {target_url}: {e}"
             ) from e
         except httpx.RequestError as e:
             raise A2AClientHTTPError(
                 503,
-                f'Network communication error fetching agent card from {target_url}: {e}',
+                f"Network communication error fetching agent card from {target_url}: {e}",
             ) from e
         except ValidationError as e:  # Pydantic validation error
             raise A2AClientJSONError(
-                f'Failed to validate agent card structure from {target_url}: {e.json()}'
+                f"Failed to validate agent card structure from {target_url}: {e.json()}"
             ) from e
 
         return agent_card
@@ -147,7 +144,7 @@ class A2AClient:
         elif url:
             self.url = url
         else:
-            raise ValueError('Must provide either agent_card or url')
+            raise ValueError("Must provide either agent_card or url")
 
         self.httpx_client = httpx_client
 
@@ -155,9 +152,9 @@ class A2AClient:
     async def get_client_from_agent_card_url(
         httpx_client: httpx.AsyncClient,
         base_url: str,
-        agent_card_path: str = '/.well-known/agent.json',
+        agent_card_path: str = "/.well-known/agent.json",
         http_kwargs: dict[str, Any] | None = None,
-    ) -> 'A2AClient':
+    ) -> "A2AClient":
         """Fetches the public AgentCard and initializes an A2A client.
 
         This method will always fetch the public agent card. If an authenticated
@@ -181,9 +178,7 @@ class A2AClient:
         """
         agent_card: AgentCard = await A2ACardResolver(
             httpx_client, base_url=base_url, agent_card_path=agent_card_path
-        ).get_agent_card(
-            http_kwargs=http_kwargs
-        )  # Fetches public card by default
+        ).get_agent_card(http_kwargs=http_kwargs)  # Fetches public card by default
         return A2AClient(httpx_client=httpx_client, agent_card=agent_card)
 
     async def send_message(
@@ -209,9 +204,9 @@ class A2AClient:
         if not request.id:
             request.id = str(uuid4())
 
-        return SendMessageResponse(
-            **await self._send_request(
-                request.model_dump(mode='json', exclude_none=True),
+        return SendMessageResponse.model_validate(
+            await self._send_request(
+                request.model_dump(mode="json", exclude_none=True),
                 http_kwargs,
             )
         )
@@ -244,15 +239,15 @@ class A2AClient:
 
         # Default to no timeout for streaming, can be overridden by http_kwargs
         http_kwargs_with_timeout: dict[str, Any] = {
-            'timeout': None,
+            "timeout": None,
             **(http_kwargs or {}),
         }
 
         async with aconnect_sse(
             self.httpx_client,
-            'POST',
+            "POST",
             self.url,
-            json=request.model_dump(mode='json', exclude_none=True),
+            json=request.model_dump(mode="json", exclude_none=True),
             **http_kwargs_with_timeout,
         ) as event_source:
             try:
@@ -261,13 +256,13 @@ class A2AClient:
             except SSEError as e:
                 raise A2AClientHTTPError(
                     400,
-                    f'Invalid SSE response or protocol error: {e}',
+                    f"Invalid SSE response or protocol error: {e}",
                 ) from e
             except json.JSONDecodeError as e:
                 raise A2AClientJSONError(str(e)) from e
             except httpx.RequestError as e:
                 raise A2AClientHTTPError(
-                    503, f'Network communication error: {e}'
+                    503, f"Network communication error: {e}"
                 ) from e
 
     async def _send_request(
@@ -300,9 +295,7 @@ class A2AClient:
         except json.JSONDecodeError as e:
             raise A2AClientJSONError(str(e)) from e
         except httpx.RequestError as e:
-            raise A2AClientHTTPError(
-                503, f'Network communication error: {e}'
-            ) from e
+            raise A2AClientHTTPError(503, f"Network communication error: {e}") from e
 
     async def get_task(
         self,
@@ -329,7 +322,7 @@ class A2AClient:
 
         return GetTaskResponse(
             **await self._send_request(
-                request.model_dump(mode='json', exclude_none=True),
+                request.model_dump(mode="json", exclude_none=True),
                 http_kwargs,
             )
         )
@@ -359,7 +352,7 @@ class A2AClient:
 
         return CancelTaskResponse(
             **await self._send_request(
-                request.model_dump(mode='json', exclude_none=True),
+                request.model_dump(mode="json", exclude_none=True),
                 http_kwargs,
             )
         )
@@ -389,7 +382,7 @@ class A2AClient:
 
         return SetTaskPushNotificationConfigResponse(
             **await self._send_request(
-                request.model_dump(mode='json', exclude_none=True),
+                request.model_dump(mode="json", exclude_none=True),
                 http_kwargs,
             )
         )
@@ -419,7 +412,7 @@ class A2AClient:
 
         return GetTaskPushNotificationConfigResponse(
             **await self._send_request(
-                request.model_dump(mode='json', exclude_none=True),
+                request.model_dump(mode="json", exclude_none=True),
                 http_kwargs,
             )
         )
