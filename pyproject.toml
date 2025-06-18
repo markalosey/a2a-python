@@ -16,11 +16,7 @@ dependencies = [
     "opentelemetry-sdk>=1.33.0",
     "pydantic>=2.11.3",
     "sse-starlette",
-    "starlette",
-    "grpcio>=1.60",
-    "grpcio-tools>=1.60",
-    "grpcio_reflection>=1.7.0",
-    "protobuf==6.31.1",
+    "starlette"
 ]
 
 classifiers = [
