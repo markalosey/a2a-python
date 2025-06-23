@@ -1,0 +1,2492 @@
+diff --git a/remove-grpc.patch b/remove-grpc.patch
+new file mode 100644
+index 0000000..76ecf8c
+--- /dev/null
++++ b/remove-grpc.patch
+@@ -0,0 +1,296 @@
++From ca2827e99a14766ebbc4bc8a8acd4a11bd73ec44 Mon Sep 17 00:00:00 2001
++From: Mark Losey <mark.losey@flockx.io>
++Date: Wed, 18 Jun 2025 15:08:05 -0400
++Subject: [PATCH 1/3] When using the Google A2A Python SDK (a2a-sdk), JSON-RPC
++ responses that are defined as Pydantic root models (such as
++ SendMessageResponse) are not parsed correctly. This results in validation
++ errors when the client attempts to deserialize responses from a compliant A2A
++ server.
++
++---
++ src/a2a/client/client.py | 61 ++++++++++++++++++----------------------
++ 1 file changed, 27 insertions(+), 34 deletions(-)
++
++diff --git a/src/a2a/client/client.py b/src/a2a/client/client.py
++index 5bcc36f..f5b8733 100644
++--- a/src/a2a/client/client.py
+++++ b/src/a2a/client/client.py
++@@ -1,12 +1,10 @@
++ import json
++ import logging
++-
++ from collections.abc import AsyncGenerator
++ from typing import Any
++ from uuid import uuid4
++ 
++ import httpx
++-
++ from httpx_sse import SSEError, aconnect_sse
++ from pydantic import ValidationError
++ 
++@@ -28,7 +26,6 @@ from a2a.types import (
++ )
++ from a2a.utils.telemetry import SpanKind, trace_class
++ 
++-
++ logger = logging.getLogger(__name__)
++ 
++ 
++@@ -39,7 +36,7 @@ class A2ACardResolver:
++         self,
++         httpx_client: httpx.AsyncClient,
++         base_url: str,
++-        agent_card_path: str = '/.well-known/agent.json',
+++        agent_card_path: str = "/.well-known/agent.json",
++     ):
++         """Initializes the A2ACardResolver.
++ 
++@@ -48,8 +45,8 @@ class A2ACardResolver:
++             base_url: The base URL of the agent's host.
++             agent_card_path: The path to the agent card endpoint, relative to the base URL.
++         """
++-        self.base_url = base_url.rstrip('/')
++-        self.agent_card_path = agent_card_path.lstrip('/')
+++        self.base_url = base_url.rstrip("/")
+++        self.agent_card_path = agent_card_path.lstrip("/")
++         self.httpx_client = httpx_client
++ 
++     async def get_agent_card(
++@@ -81,9 +78,9 @@ class A2ACardResolver:
++             # Use the default public agent card path configured during initialization
++             path_segment = self.agent_card_path
++         else:
++-            path_segment = relative_card_path.lstrip('/')
+++            path_segment = relative_card_path.lstrip("/")
++ 
++-        target_url = f'{self.base_url}/{path_segment}'
+++        target_url = f"{self.base_url}/{path_segment}"
++ 
++         try:
++             response = await self.httpx_client.get(
++@@ -93,7 +90,7 @@ class A2ACardResolver:
++             response.raise_for_status()
++             agent_card_data = response.json()
++             logger.info(
++-                'Successfully fetched agent card data from %s: %s',
+++                "Successfully fetched agent card data from %s: %s",
++                 target_url,
++                 agent_card_data,
++             )
++@@ -101,20 +98,20 @@ class A2ACardResolver:
++         except httpx.HTTPStatusError as e:
++             raise A2AClientHTTPError(
++                 e.response.status_code,
++-                f'Failed to fetch agent card from {target_url}: {e}',
+++                f"Failed to fetch agent card from {target_url}: {e}",
++             ) from e
++         except json.JSONDecodeError as e:
++             raise A2AClientJSONError(
++-                f'Failed to parse JSON for agent card from {target_url}: {e}'
+++                f"Failed to parse JSON for agent card from {target_url}: {e}"
++             ) from e
++         except httpx.RequestError as e:
++             raise A2AClientHTTPError(
++                 503,
++-                f'Network communication error fetching agent card from {target_url}: {e}',
+++                f"Network communication error fetching agent card from {target_url}: {e}",
++             ) from e
++         except ValidationError as e:  # Pydantic validation error
++             raise A2AClientJSONError(
++-                f'Failed to validate agent card structure from {target_url}: {e.json()}'
+++                f"Failed to validate agent card structure from {target_url}: {e.json()}"
++             ) from e
++ 
++         return agent_card
++@@ -147,7 +144,7 @@ class A2AClient:
++         elif url:
++             self.url = url
++         else:
++-            raise ValueError('Must provide either agent_card or url')
+++            raise ValueError("Must provide either agent_card or url")
++ 
++         self.httpx_client = httpx_client
++ 
++@@ -155,9 +152,9 @@ class A2AClient:
++     async def get_client_from_agent_card_url(
++         httpx_client: httpx.AsyncClient,
++         base_url: str,
++-        agent_card_path: str = '/.well-known/agent.json',
+++        agent_card_path: str = "/.well-known/agent.json",
++         http_kwargs: dict[str, Any] | None = None,
++-    ) -> 'A2AClient':
+++    ) -> "A2AClient":
++         """Fetches the public AgentCard and initializes an A2A client.
++ 
++         This method will always fetch the public agent card. If an authenticated
++@@ -181,9 +178,7 @@ class A2AClient:
++         """
++         agent_card: AgentCard = await A2ACardResolver(
++             httpx_client, base_url=base_url, agent_card_path=agent_card_path
++-        ).get_agent_card(
++-            http_kwargs=http_kwargs
++-        )  # Fetches public card by default
+++        ).get_agent_card(http_kwargs=http_kwargs)  # Fetches public card by default
++         return A2AClient(httpx_client=httpx_client, agent_card=agent_card)
++ 
++     async def send_message(
++@@ -209,9 +204,9 @@ class A2AClient:
++         if not request.id:
++             request.id = str(uuid4())
++ 
++-        return SendMessageResponse(
++-            **await self._send_request(
++-                request.model_dump(mode='json', exclude_none=True),
+++        return SendMessageResponse.model_validate(
+++            await self._send_request(
+++                request.model_dump(mode="json", exclude_none=True),
++                 http_kwargs,
++             )
++         )
++@@ -244,15 +239,15 @@ class A2AClient:
++ 
++         # Default to no timeout for streaming, can be overridden by http_kwargs
++         http_kwargs_with_timeout: dict[str, Any] = {
++-            'timeout': None,
+++            "timeout": None,
++             **(http_kwargs or {}),
++         }
++ 
++         async with aconnect_sse(
++             self.httpx_client,
++-            'POST',
+++            "POST",
++             self.url,
++-            json=request.model_dump(mode='json', exclude_none=True),
+++            json=request.model_dump(mode="json", exclude_none=True),
++             **http_kwargs_with_timeout,
++         ) as event_source:
++             try:
++@@ -261,13 +256,13 @@ class A2AClient:
++             except SSEError as e:
++                 raise A2AClientHTTPError(
++                     400,
++-                    f'Invalid SSE response or protocol error: {e}',
+++                    f"Invalid SSE response or protocol error: {e}",
++                 ) from e
++             except json.JSONDecodeError as e:
++                 raise A2AClientJSONError(str(e)) from e
++             except httpx.RequestError as e:
++                 raise A2AClientHTTPError(
++-                    503, f'Network communication error: {e}'
+++                    503, f"Network communication error: {e}"
++                 ) from e
++ 
++     async def _send_request(
++@@ -300,9 +295,7 @@ class A2AClient:
++         except json.JSONDecodeError as e:
++             raise A2AClientJSONError(str(e)) from e
++         except httpx.RequestError as e:
++-            raise A2AClientHTTPError(
++-                503, f'Network communication error: {e}'
++-            ) from e
+++            raise A2AClientHTTPError(503, f"Network communication error: {e}") from e
++ 
++     async def get_task(
++         self,
++@@ -329,7 +322,7 @@ class A2AClient:
++ 
++         return GetTaskResponse(
++             **await self._send_request(
++-                request.model_dump(mode='json', exclude_none=True),
+++                request.model_dump(mode="json", exclude_none=True),
++                 http_kwargs,
++             )
++         )
++@@ -359,7 +352,7 @@ class A2AClient:
++ 
++         return CancelTaskResponse(
++             **await self._send_request(
++-                request.model_dump(mode='json', exclude_none=True),
+++                request.model_dump(mode="json", exclude_none=True),
++                 http_kwargs,
++             )
++         )
++@@ -389,7 +382,7 @@ class A2AClient:
++ 
++         return SetTaskPushNotificationConfigResponse(
++             **await self._send_request(
++-                request.model_dump(mode='json', exclude_none=True),
+++                request.model_dump(mode="json", exclude_none=True),
++                 http_kwargs,
++             )
++         )
++@@ -419,7 +412,7 @@ class A2AClient:
++ 
++         return GetTaskPushNotificationConfigResponse(
++             **await self._send_request(
++-                request.model_dump(mode='json', exclude_none=True),
+++                request.model_dump(mode="json", exclude_none=True),
++                 http_kwargs,
++             )
++         )
++-- 
++2.39.5 (Apple Git-154)
++
++
++From 1193529aa475e8397c6a031ef5b426f9827c51d8 Mon Sep 17 00:00:00 2001
++From: Mark Losey <mark.losey@flockx.io>
++Date: Wed, 18 Jun 2025 16:02:09 -0400
++Subject: [PATCH 2/3] removing the problematic dependencies
++
++---
++ pyproject.toml | 6 +-----
++ 1 file changed, 1 insertion(+), 5 deletions(-)
++
++diff --git a/pyproject.toml b/pyproject.toml
++index 56fb1e3..e9997f2 100644
++--- a/pyproject.toml
+++++ b/pyproject.toml
++@@ -16,11 +16,7 @@ dependencies = [
++     "opentelemetry-sdk>=1.33.0",
++     "pydantic>=2.11.3",
++     "sse-starlette",
++-    "starlette",
++-    "grpcio>=1.60",
++-    "grpcio-tools>=1.60",
++-    "grpcio_reflection>=1.7.0",
++-    "protobuf==6.31.1",
+++    "starlette"
++ ]
++ 
++ classifiers = [
++-- 
++2.39.5 (Apple Git-154)
++
++
++From 2ddba303a09bd39db79b9d3c701ac83f53a3aec5 Mon Sep 17 00:00:00 2001
++From: Mark Losey <mark.losey@flockx.io>
++Date: Wed, 18 Jun 2025 16:12:03 -0400
++Subject: [PATCH 3/3] removing import of grpc
++
++---
++ src/a2a/client/__init__.py | 2 --
++ 1 file changed, 2 deletions(-)
++
++diff --git a/src/a2a/client/__init__.py b/src/a2a/client/__init__.py
++index e91c9eb..3455c86 100644
++--- a/src/a2a/client/__init__.py
+++++ b/src/a2a/client/__init__.py
++@@ -6,7 +6,6 @@ from a2a.client.errors import (
++     A2AClientHTTPError,
++     A2AClientJSONError,
++ )
++-from a2a.client.grpc_client import A2AGrpcClient
++ from a2a.client.helpers import create_text_message_object
++ 
++ 
++@@ -16,6 +15,5 @@ __all__ = [
++     'A2AClientError',
++     'A2AClientHTTPError',
++     'A2AClientJSONError',
++-    'A2AGrpcClient',
++     'create_text_message_object',
++ ]
++-- 
++2.39.5 (Apple Git-154)
++
+diff --git a/scripts/grpc_gen_post_processor.py b/scripts/grpc_gen_post_processor.py
+index ce6b361..17fc296 100644
+--- a/scripts/grpc_gen_post_processor.py
++++ b/scripts/grpc_gen_post_processor.py
+@@ -5,52 +5,46 @@ import a2a_pb2 as a2a__pb2
+ from . import a2a_pb2 as a2a__pb2
+ """
+ 
+-import re
+-import sys
+-
+-from pathlib import Path
+-
+-
+-def process_generated_code(src_folder: str = 'src/a2a/grpc') -> None:
+-    """Post processor for the generated code."""
+-    dir_path = Path(src_folder)
+-    print(dir_path)
+-    if not dir_path.is_dir():
+-        print('Source folder not found')
+-        sys.exit(1)
+-
+-    grpc_pattern = '**/*_pb2_grpc.py'
+-    files = dir_path.glob(grpc_pattern)
+-
+-    for file in files:
+-        print(f'Processing {file}')
+-        try:
+-            with file.open('r', encoding='utf-8') as f:
+-                src_content = f.read()
+-
+-                # Change import a2a_pb2 as a2a__pb2
+-                import_pattern = r'^import (\w+_pb2) as (\w+__pb2)$'
+-                # to from . import a2a_pb2 as a2a__pb2
+-                replacement_pattern = r'from . import \1 as \2'
+-
+-                fixed_src_content = re.sub(
+-                    import_pattern,
+-                    replacement_pattern,
+-                    src_content,
+-                    flags=re.MULTILINE,
+-                )
+-
+-            if fixed_src_content != src_content:
+-                with file.open('w', encoding='utf-8') as f:
+-                    f.write(fixed_src_content)
+-                    print('Imports fixed')
+-            else:
+-                print('No changes needed')
+-
+-        except Exception as e:
+-            print(f'Error processing file {file}: {e}')
+-            sys.exit(1)
+ 
++# def process_generated_code(src_folder: str = 'src/a2a/grpc') -> None:
++#     """Post processor for the generated code."""
++#     dir_path = Path(src_folder)
++#     print(dir_path)
++#     if not dir_path.is_dir():
++#         print('Source folder not found')
++#         sys.exit(1)
++#
++#     grpc_pattern = '**/*_pb2_grpc.py'
++#     files = dir_path.glob(grpc_pattern)
++#
++#     for file in files:
++#         print(f'Processing {file}')
++#         try:
++#             with file.open('r', encoding='utf-8') as f:
++#                 src_content = f.read()
++#
++#                 # Change import a2a_pb2 as a2a__pb2
++#                 import_pattern = r'^import (\w+_pb2) as (\w+__pb2)$'
++#                 # to from . import a2a_pb2 as a2a__pb2
++#                 replacement_pattern = r'from . import \1 as \2'
++#
++#                 fixed_src_content = re.sub(
++#                     import_pattern,
++#                     replacement_pattern,
++#                     src_content,
++#                     flags=re.MULTILINE,
++#                 )
++#
++#             if fixed_src_content != src_content:
++#                 with file.open('w', encoding='utf-8') as f:
++#                     f.write(fixed_src_content)
++#                     print('Imports fixed')
++#             else:
++#                 print('No changes needed')
++#
++#         except Exception as e:
++#             print(f'Error processing file {file}: {e}')
++#             sys.exit(1)
+ 
+ if __name__ == '__main__':
+-    process_generated_code()
++    pass
+diff --git a/src/a2a/client/grpc_client.py b/src/a2a/client/grpc_client.py
+deleted file mode 100644
+index a0fbc51..0000000
+--- a/src/a2a/client/grpc_client.py
++++ /dev/null
+@@ -1,190 +0,0 @@
+-import logging
+-
+-from collections.abc import AsyncGenerator
+-
+-import grpc
+-
+-from a2a.grpc import a2a_pb2, a2a_pb2_grpc
+-from a2a.types import (
+-    AgentCard,
+-    Message,
+-    MessageSendParams,
+-    Task,
+-    TaskArtifactUpdateEvent,
+-    TaskIdParams,
+-    TaskPushNotificationConfig,
+-    TaskQueryParams,
+-    TaskStatusUpdateEvent,
+-)
+-from a2a.utils import proto_utils
+-from a2a.utils.telemetry import SpanKind, trace_class
+-
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-@trace_class(kind=SpanKind.CLIENT)
+-class A2AGrpcClient:
+-    """A2A Client for interacting with an A2A agent via gRPC."""
+-
+-    def __init__(
+-        self,
+-        grpc_stub: a2a_pb2_grpc.A2AServiceStub,
+-        agent_card: AgentCard,
+-    ):
+-        """Initializes the A2AGrpcClient.
+-
+-        Requires an `AgentCard`
+-
+-        Args:
+-            grpc_stub: A grpc client stub.
+-            agent_card: The agent card object.
+-        """
+-        self.agent_card = agent_card
+-        self.stub = grpc_stub
+-
+-    async def send_message(
+-        self,
+-        request: MessageSendParams,
+-    ) -> Task | Message:
+-        """Sends a non-streaming message request to the agent.
+-
+-        Args:
+-            request: The `MessageSendParams` object containing the message and configuration.
+-
+-        Returns:
+-            A `Task` or `Message` object containing the agent's response.
+-        """
+-        response = await self.stub.SendMessage(
+-            a2a_pb2.SendMessageRequest(
+-                request=proto_utils.ToProto.message(request.message),
+-                configuration=proto_utils.ToProto.message_send_configuration(
+-                    request.configuration
+-                ),
+-                metadata=proto_utils.ToProto.metadata(request.metadata),
+-            )
+-        )
+-        if response.task:
+-            return proto_utils.FromProto.task(response.task)
+-        return proto_utils.FromProto.message(response.msg)
+-
+-    async def send_message_streaming(
+-        self,
+-        request: MessageSendParams,
+-    ) -> AsyncGenerator[
+-        Message | Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent
+-    ]:
+-        """Sends a streaming message request to the agent and yields responses as they arrive.
+-
+-        This method uses gRPC streams to receive a stream of updates from the
+-        agent.
+-
+-        Args:
+-            request: The `MessageSendParams` object containing the message and configuration.
+-
+-        Yields:
+-            `Message` or `Task` or `TaskStatusUpdateEvent` or
+-            `TaskArtifactUpdateEvent` objects as they are received in the
+-            stream.
+-        """
+-        stream = self.stub.SendStreamingMessage(
+-            a2a_pb2.SendMessageRequest(
+-                request=proto_utils.ToProto.message(request.message),
+-                configuration=proto_utils.ToProto.message_send_configuration(
+-                    request.configuration
+-                ),
+-                metadata=proto_utils.ToProto.metadata(request.metadata),
+-            )
+-        )
+-        while True:
+-            response = await stream.read()
+-            if response == grpc.aio.EOF:
+-                break
+-            if response.HasField('msg'):
+-                yield proto_utils.FromProto.message(response.msg)
+-            elif response.HasField('task'):
+-                yield proto_utils.FromProto.task(response.task)
+-            elif response.HasField('status_update'):
+-                yield proto_utils.FromProto.task_status_update_event(
+-                    response.status_update
+-                )
+-            elif response.HasField('artifact_update'):
+-                yield proto_utils.FromProto.task_artifact_update_event(
+-                    response.artifact_update
+-                )
+-
+-    async def get_task(
+-        self,
+-        request: TaskQueryParams,
+-    ) -> Task:
+-        """Retrieves the current state and history of a specific task.
+-
+-        Args:
+-            request: The `TaskQueryParams` object specifying the task ID
+-
+-        Returns:
+-            A `Task` object containing the Task or None.
+-        """
+-        task = await self.stub.GetTask(
+-            a2a_pb2.GetTaskRequest(name=f'tasks/{request.id}')
+-        )
+-        return proto_utils.FromProto.task(task)
+-
+-    async def cancel_task(
+-        self,
+-        request: TaskIdParams,
+-    ) -> Task:
+-        """Requests the agent to cancel a specific task.
+-
+-        Args:
+-            request: The `TaskIdParams` object specifying the task ID.
+-
+-        Returns:
+-            A `Task` object containing the updated Task
+-        """
+-        task = await self.stub.CancelTask(
+-            a2a_pb2.CancelTaskRequest(name=f'tasks/{request.id}')
+-        )
+-        return proto_utils.FromProto.task(task)
+-
+-    async def set_task_callback(
+-        self,
+-        request: TaskPushNotificationConfig,
+-    ) -> TaskPushNotificationConfig:
+-        """Sets or updates the push notification configuration for a specific task.
+-
+-        Args:
+-            request: The `TaskPushNotificationConfig` object specifying the task ID and configuration.
+-
+-        Returns:
+-            A `TaskPushNotificationConfig` object containing the config.
+-        """
+-        config = await self.stub.CreateTaskPushNotificationConfig(
+-            a2a_pb2.CreateTaskPushNotificationConfigRequest(
+-                parent='',
+-                config_id='',
+-                config=proto_utils.ToProto.task_push_notification_config(
+-                    request
+-                ),
+-            )
+-        )
+-        return proto_utils.FromProto.task_push_notification_config(config)
+-
+-    async def get_task_callback(
+-        self,
+-        request: TaskIdParams,  # TODO: Update to a push id params
+-    ) -> TaskPushNotificationConfig:
+-        """Retrieves the push notification configuration for a specific task.
+-
+-        Args:
+-            request: The `TaskIdParams` object specifying the task ID.
+-
+-        Returns:
+-            A `TaskPushNotificationConfig` object containing the configuration.
+-        """
+-        config = await self.stub.GetTaskPushNotificationConfig(
+-            a2a_pb2.GetTaskPushNotificationConfigRequest(
+-                name=f'tasks/{request.id}/pushNotification/undefined',
+-            )
+-        )
+-        return proto_utils.FromProto.task_push_notification_config(config)
+diff --git a/src/a2a/grpc/__init__.py b/src/a2a/grpc/__init__.py
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/src/a2a/grpc/a2a_pb2.py b/src/a2a/grpc/a2a_pb2.py
+deleted file mode 100644
+index 2016e47..0000000
+--- a/src/a2a/grpc/a2a_pb2.py
++++ /dev/null
+@@ -1,187 +0,0 @@
+-# -*- coding: utf-8 -*-
+-# Generated by the protocol buffer compiler.  DO NOT EDIT!
+-# NO CHECKED-IN PROTOBUF GENCODE
+-# source: a2a.proto
+-# Protobuf Python Version: 6.31.1
+-"""Generated protocol buffer code."""
+-from google.protobuf import descriptor as _descriptor
+-from google.protobuf import descriptor_pool as _descriptor_pool
+-from google.protobuf import runtime_version as _runtime_version
+-from google.protobuf import symbol_database as _symbol_database
+-from google.protobuf.internal import builder as _builder
+-_runtime_version.ValidateProtobufRuntimeVersion(
+-    _runtime_version.Domain.PUBLIC,
+-    6,
+-    31,
+-    1,
+-    '',
+-    'a2a.proto'
+-)
+-# @@protoc_insertion_point(imports)
+-
+-_sym_db = _symbol_database.Default()
+-
+-
+-from google.api import annotations_pb2 as google_dot_api_dot_annotations__pb2
+-from google.api import client_pb2 as google_dot_api_dot_client__pb2
+-from google.api import field_behavior_pb2 as google_dot_api_dot_field__behavior__pb2
+-from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
+-from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
+-from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
+-
+-
+-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ta2a.proto\x12\x06\x61\x32\x61.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xde\x01\n\x18SendMessageConfiguration\x12\x32\n\x15\x61\x63\x63\x65pted_output_modes\x18\x01 \x03(\tR\x13\x61\x63\x63\x65ptedOutputModes\x12K\n\x11push_notification\x18\x02 \x01(\x0b\x32\x1e.a2a.v1.PushNotificationConfigR\x10pushNotification\x12%\n\x0ehistory_length\x18\x03 \x01(\x05R\rhistoryLength\x12\x1a\n\x08\x62locking\x18\x04 \x01(\x08R\x08\x62locking\"\xf1\x01\n\x04Task\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ncontext_id\x18\x02 \x01(\tR\tcontextId\x12*\n\x06status\x18\x03 \x01(\x0b\x32\x12.a2a.v1.TaskStatusR\x06status\x12.\n\tartifacts\x18\x04 \x03(\x0b\x32\x10.a2a.v1.ArtifactR\tartifacts\x12)\n\x07history\x18\x05 \x03(\x0b\x32\x0f.a2a.v1.MessageR\x07history\x12\x33\n\x08metadata\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\"\x98\x01\n\nTaskStatus\x12\'\n\x05state\x18\x01 \x01(\x0e\x32\x11.a2a.v1.TaskStateR\x05state\x12\'\n\x06update\x18\x02 \x01(\x0b\x32\x0f.a2a.v1.MessageR\x06update\x12\x38\n\ttimestamp\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\ttimestamp\"t\n\x04Part\x12\x14\n\x04text\x18\x01 \x01(\tH\x00R\x04text\x12&\n\x04\x66ile\x18\x02 \x01(\x0b\x32\x10.a2a.v1.FilePartH\x00R\x04\x66ile\x12&\n\x04\x64\x61ta\x18\x03 \x01(\x0b\x32\x10.a2a.v1.DataPartH\x00R\x04\x64\x61taB\x06\n\x04part\"\x7f\n\x08\x46ilePart\x12$\n\rfile_with_uri\x18\x01 \x01(\tH\x00R\x0b\x66ileWithUri\x12(\n\x0f\x66ile_with_bytes\x18\x02 \x01(\x0cH\x00R\rfileWithBytes\x12\x1b\n\tmime_type\x18\x03 \x01(\tR\x08mimeTypeB\x06\n\x04\x66ile\"7\n\x08\x44\x61taPart\x12+\n\x04\x64\x61ta\x18\x01 \x01(\x0b\x32\x17.google.protobuf.StructR\x04\x64\x61ta\"\xff\x01\n\x07Message\x12\x1d\n\nmessage_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n\ncontext_id\x18\x02 \x01(\tR\tcontextId\x12\x17\n\x07task_id\x18\x03 \x01(\tR\x06taskId\x12 \n\x04role\x18\x04 \x01(\x0e\x32\x0c.a2a.v1.RoleR\x04role\x12&\n\x07\x63ontent\x18\x05 \x03(\x0b\x32\x0c.a2a.v1.PartR\x07\x63ontent\x12\x33\n\x08metadata\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\x12\x1e\n\nextensions\x18\x07 \x03(\tR\nextensions\"\xda\x01\n\x08\x41rtifact\x12\x1f\n\x0b\x61rtifact_id\x18\x01 \x01(\tR\nartifactId\x12\x12\n\x04name\x18\x03 \x01(\tR\x04name\x12 \n\x0b\x64\x65scription\x18\x04 \x01(\tR\x0b\x64\x65scription\x12\"\n\x05parts\x18\x05 \x03(\x0b\x32\x0c.a2a.v1.PartR\x05parts\x12\x33\n\x08metadata\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\x12\x1e\n\nextensions\x18\x07 \x03(\tR\nextensions\"\xc6\x01\n\x15TaskStatusUpdateEvent\x12\x17\n\x07task_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n\ncontext_id\x18\x02 \x01(\tR\tcontextId\x12*\n\x06status\x18\x03 \x01(\x0b\x32\x12.a2a.v1.TaskStatusR\x06status\x12\x14\n\x05\x66inal\x18\x04 \x01(\x08R\x05\x66inal\x12\x33\n\x08metadata\x18\x05 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\"\xeb\x01\n\x17TaskArtifactUpdateEvent\x12\x17\n\x07task_id\x18\x01 \x01(\tR\x06taskId\x12\x1d\n\ncontext_id\x18\x02 \x01(\tR\tcontextId\x12,\n\x08\x61rtifact\x18\x03 \x01(\x0b\x32\x10.a2a.v1.ArtifactR\x08\x61rtifact\x12\x16\n\x06\x61ppend\x18\x04 \x01(\x08R\x06\x61ppend\x12\x1d\n\nlast_chunk\x18\x05 \x01(\x08R\tlastChunk\x12\x33\n\x08metadata\x18\x06 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\"\x94\x01\n\x16PushNotificationConfig\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05token\x18\x03 \x01(\tR\x05token\x12\x42\n\x0e\x61uthentication\x18\x04 \x01(\x0b\x32\x1a.a2a.v1.AuthenticationInfoR\x0e\x61uthentication\"P\n\x12\x41uthenticationInfo\x12\x18\n\x07schemes\x18\x01 \x03(\tR\x07schemes\x12 \n\x0b\x63redentials\x18\x02 \x01(\tR\x0b\x63redentials\"@\n\x0e\x41gentInterface\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x1c\n\ttransport\x18\x02 \x01(\tR\ttransport\"\xc6\x06\n\tAgentCard\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12 \n\x0b\x64\x65scription\x18\x02 \x01(\tR\x0b\x64\x65scription\x12\x10\n\x03url\x18\x03 \x01(\tR\x03url\x12/\n\x13preferred_transport\x18\x0e \x01(\tR\x12preferredTransport\x12K\n\x15\x61\x64\x64itional_interfaces\x18\x0f \x03(\x0b\x32\x16.a2a.v1.AgentInterfaceR\x14\x61\x64\x64itionalInterfaces\x12\x31\n\x08provider\x18\x04 \x01(\x0b\x32\x15.a2a.v1.AgentProviderR\x08provider\x12\x18\n\x07version\x18\x05 \x01(\tR\x07version\x12+\n\x11\x64ocumentation_url\x18\x06 \x01(\tR\x10\x64ocumentationUrl\x12=\n\x0c\x63\x61pabilities\x18\x07 \x01(\x0b\x32\x19.a2a.v1.AgentCapabilitiesR\x0c\x63\x61pabilities\x12Q\n\x10security_schemes\x18\x08 \x03(\x0b\x32&.a2a.v1.AgentCard.SecuritySchemesEntryR\x0fsecuritySchemes\x12,\n\x08security\x18\t \x03(\x0b\x32\x10.a2a.v1.SecurityR\x08security\x12.\n\x13\x64\x65\x66\x61ult_input_modes\x18\n \x03(\tR\x11\x64\x65\x66\x61ultInputModes\x12\x30\n\x14\x64\x65\x66\x61ult_output_modes\x18\x0b \x03(\tR\x12\x64\x65\x66\x61ultOutputModes\x12*\n\x06skills\x18\x0c \x03(\x0b\x32\x12.a2a.v1.AgentSkillR\x06skills\x12O\n$supports_authenticated_extended_card\x18\r \x01(\x08R!supportsAuthenticatedExtendedCard\x1aZ\n\x14SecuritySchemesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12,\n\x05value\x18\x02 \x01(\x0b\x32\x16.a2a.v1.SecuritySchemeR\x05value:\x02\x38\x01\"E\n\rAgentProvider\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\"\n\x0corganization\x18\x02 \x01(\tR\x0corganization\"\x98\x01\n\x11\x41gentCapabilities\x12\x1c\n\tstreaming\x18\x01 \x01(\x08R\tstreaming\x12-\n\x12push_notifications\x18\x02 \x01(\x08R\x11pushNotifications\x12\x36\n\nextensions\x18\x03 \x03(\x0b\x32\x16.a2a.v1.AgentExtensionR\nextensions\"\x91\x01\n\x0e\x41gentExtension\x12\x10\n\x03uri\x18\x01 \x01(\tR\x03uri\x12 \n\x0b\x64\x65scription\x18\x02 \x01(\tR\x0b\x64\x65scription\x12\x1a\n\x08required\x18\x03 \x01(\x08R\x08required\x12/\n\x06params\x18\x04 \x01(\x0b\x32\x17.google.protobuf.StructR\x06params\"\xc6\x01\n\nAgentSkill\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12 \n\x0b\x64\x65scription\x18\x03 \x01(\tR\x0b\x64\x65scription\x12\x12\n\x04tags\x18\x04 \x03(\tR\x04tags\x12\x1a\n\x08\x65xamples\x18\x05 \x03(\tR\x08\x65xamples\x12\x1f\n\x0binput_modes\x18\x06 \x03(\tR\ninputModes\x12!\n\x0coutput_modes\x18\x07 \x03(\tR\x0boutputModes\"\x8a\x01\n\x1aTaskPushNotificationConfig\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12X\n\x18push_notification_config\x18\x02 \x01(\x0b\x32\x1e.a2a.v1.PushNotificationConfigR\x16pushNotificationConfig\" \n\nStringList\x12\x12\n\x04list\x18\x01 \x03(\tR\x04list\"\x93\x01\n\x08Security\x12\x37\n\x07schemes\x18\x01 \x03(\x0b\x32\x1d.a2a.v1.Security.SchemesEntryR\x07schemes\x1aN\n\x0cSchemesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12(\n\x05value\x18\x02 \x01(\x0b\x32\x12.a2a.v1.StringListR\x05value:\x02\x38\x01\"\x91\x03\n\x0eSecurityScheme\x12U\n\x17\x61pi_key_security_scheme\x18\x01 \x01(\x0b\x32\x1c.a2a.v1.APIKeySecuritySchemeH\x00R\x14\x61piKeySecurityScheme\x12[\n\x19http_auth_security_scheme\x18\x02 \x01(\x0b\x32\x1e.a2a.v1.HTTPAuthSecuritySchemeH\x00R\x16httpAuthSecurityScheme\x12T\n\x16oauth2_security_scheme\x18\x03 \x01(\x0b\x32\x1c.a2a.v1.OAuth2SecuritySchemeH\x00R\x14oauth2SecurityScheme\x12k\n\x1fopen_id_connect_security_scheme\x18\x04 \x01(\x0b\x32#.a2a.v1.OpenIdConnectSecuritySchemeH\x00R\x1bopenIdConnectSecuritySchemeB\x08\n\x06scheme\"h\n\x14\x41PIKeySecurityScheme\x12 \n\x0b\x64\x65scription\x18\x01 \x01(\tR\x0b\x64\x65scription\x12\x1a\n\x08location\x18\x02 \x01(\tR\x08location\x12\x12\n\x04name\x18\x03 \x01(\tR\x04name\"w\n\x16HTTPAuthSecurityScheme\x12 \n\x0b\x64\x65scription\x18\x01 \x01(\tR\x0b\x64\x65scription\x12\x16\n\x06scheme\x18\x02 \x01(\tR\x06scheme\x12#\n\rbearer_format\x18\x03 \x01(\tR\x0c\x62\x65\x61rerFormat\"b\n\x14OAuth2SecurityScheme\x12 \n\x0b\x64\x65scription\x18\x01 \x01(\tR\x0b\x64\x65scription\x12(\n\x05\x66lows\x18\x02 \x01(\x0b\x32\x12.a2a.v1.OAuthFlowsR\x05\x66lows\"n\n\x1bOpenIdConnectSecurityScheme\x12 \n\x0b\x64\x65scription\x18\x01 \x01(\tR\x0b\x64\x65scription\x12-\n\x13open_id_connect_url\x18\x02 \x01(\tR\x10openIdConnectUrl\"\xb0\x02\n\nOAuthFlows\x12S\n\x12\x61uthorization_code\x18\x01 \x01(\x0b\x32\".a2a.v1.AuthorizationCodeOAuthFlowH\x00R\x11\x61uthorizationCode\x12S\n\x12\x63lient_credentials\x18\x02 \x01(\x0b\x32\".a2a.v1.ClientCredentialsOAuthFlowH\x00R\x11\x63lientCredentials\x12\x37\n\x08implicit\x18\x03 \x01(\x0b\x32\x19.a2a.v1.ImplicitOAuthFlowH\x00R\x08implicit\x12\x37\n\x08password\x18\x04 \x01(\x0b\x32\x19.a2a.v1.PasswordOAuthFlowH\x00R\x08passwordB\x06\n\x04\x66low\"\x8a\x02\n\x1a\x41uthorizationCodeOAuthFlow\x12+\n\x11\x61uthorization_url\x18\x01 \x01(\tR\x10\x61uthorizationUrl\x12\x1b\n\ttoken_url\x18\x02 \x01(\tR\x08tokenUrl\x12\x1f\n\x0brefresh_url\x18\x03 \x01(\tR\nrefreshUrl\x12\x46\n\x06scopes\x18\x04 \x03(\x0b\x32..a2a.v1.AuthorizationCodeOAuthFlow.ScopesEntryR\x06scopes\x1a\x39\n\x0bScopesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xdd\x01\n\x1a\x43lientCredentialsOAuthFlow\x12\x1b\n\ttoken_url\x18\x01 \x01(\tR\x08tokenUrl\x12\x1f\n\x0brefresh_url\x18\x02 \x01(\tR\nrefreshUrl\x12\x46\n\x06scopes\x18\x03 \x03(\x0b\x32..a2a.v1.ClientCredentialsOAuthFlow.ScopesEntryR\x06scopes\x1a\x39\n\x0bScopesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xdb\x01\n\x11ImplicitOAuthFlow\x12+\n\x11\x61uthorization_url\x18\x01 \x01(\tR\x10\x61uthorizationUrl\x12\x1f\n\x0brefresh_url\x18\x02 \x01(\tR\nrefreshUrl\x12=\n\x06scopes\x18\x03 \x03(\x0b\x32%.a2a.v1.ImplicitOAuthFlow.ScopesEntryR\x06scopes\x1a\x39\n\x0bScopesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xcb\x01\n\x11PasswordOAuthFlow\x12\x1b\n\ttoken_url\x18\x01 \x01(\tR\x08tokenUrl\x12\x1f\n\x0brefresh_url\x18\x02 \x01(\tR\nrefreshUrl\x12=\n\x06scopes\x18\x03 \x03(\x0b\x32%.a2a.v1.PasswordOAuthFlow.ScopesEntryR\x06scopes\x1a\x39\n\x0bScopesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xc1\x01\n\x12SendMessageRequest\x12.\n\x07request\x18\x01 \x01(\x0b\x32\x0f.a2a.v1.MessageB\x03\xe0\x41\x02R\x07request\x12\x46\n\rconfiguration\x18\x02 \x01(\x0b\x32 .a2a.v1.SendMessageConfigurationR\rconfiguration\x12\x33\n\x08metadata\x18\x03 \x01(\x0b\x32\x17.google.protobuf.StructR\x08metadata\"P\n\x0eGetTaskRequest\x12\x17\n\x04name\x18\x01 \x01(\tB\x03\xe0\x41\x02R\x04name\x12%\n\x0ehistory_length\x18\x02 \x01(\x05R\rhistoryLength\"\'\n\x11\x43\x61ncelTaskRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\":\n$GetTaskPushNotificationConfigRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\"=\n\'DeleteTaskPushNotificationConfigRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\"\xa9\x01\n\'CreateTaskPushNotificationConfigRequest\x12\x1b\n\x06parent\x18\x01 \x01(\tB\x03\xe0\x41\x02R\x06parent\x12 \n\tconfig_id\x18\x02 \x01(\tB\x03\xe0\x41\x02R\x08\x63onfigId\x12?\n\x06\x63onfig\x18\x03 \x01(\x0b\x32\".a2a.v1.TaskPushNotificationConfigB\x03\xe0\x41\x02R\x06\x63onfig\"-\n\x17TaskSubscriptionRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\"{\n%ListTaskPushNotificationConfigRequest\x12\x16\n\x06parent\x18\x01 \x01(\tR\x06parent\x12\x1b\n\tpage_size\x18\x02 \x01(\x05R\x08pageSize\x12\x1d\n\npage_token\x18\x03 \x01(\tR\tpageToken\"\x15\n\x13GetAgentCardRequest\"i\n\x13SendMessageResponse\x12\"\n\x04task\x18\x01 \x01(\x0b\x32\x0c.a2a.v1.TaskH\x00R\x04task\x12#\n\x03msg\x18\x02 \x01(\x0b\x32\x0f.a2a.v1.MessageH\x00R\x03msgB\t\n\x07payload\"\xf6\x01\n\x0eStreamResponse\x12\"\n\x04task\x18\x01 \x01(\x0b\x32\x0c.a2a.v1.TaskH\x00R\x04task\x12#\n\x03msg\x18\x02 \x01(\x0b\x32\x0f.a2a.v1.MessageH\x00R\x03msg\x12\x44\n\rstatus_update\x18\x03 \x01(\x0b\x32\x1d.a2a.v1.TaskStatusUpdateEventH\x00R\x0cstatusUpdate\x12J\n\x0f\x61rtifact_update\x18\x04 \x01(\x0b\x32\x1f.a2a.v1.TaskArtifactUpdateEventH\x00R\x0e\x61rtifactUpdateB\t\n\x07payload\"\x8e\x01\n&ListTaskPushNotificationConfigResponse\x12<\n\x07\x63onfigs\x18\x01 \x03(\x0b\x32\".a2a.v1.TaskPushNotificationConfigR\x07\x63onfigs\x12&\n\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*\xfa\x01\n\tTaskState\x12\x1a\n\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x18\n\x14TASK_STATE_SUBMITTED\x10\x01\x12\x16\n\x12TASK_STATE_WORKING\x10\x02\x12\x18\n\x14TASK_STATE_COMPLETED\x10\x03\x12\x15\n\x11TASK_STATE_FAILED\x10\x04\x12\x18\n\x14TASK_STATE_CANCELLED\x10\x05\x12\x1d\n\x19TASK_STATE_INPUT_REQUIRED\x10\x06\x12\x17\n\x13TASK_STATE_REJECTED\x10\x07\x12\x1c\n\x18TASK_STATE_AUTH_REQUIRED\x10\x08*;\n\x04Role\x12\x14\n\x10ROLE_UNSPECIFIED\x10\x00\x12\r\n\tROLE_USER\x10\x01\x12\x0e\n\nROLE_AGENT\x10\x02\x32\xb9\n\n\nA2AService\x12\x63\n\x0bSendMessage\x12\x1a.a2a.v1.SendMessageRequest\x1a\x1b.a2a.v1.SendMessageResponse\"\x1b\x82\xd3\xe4\x93\x02\x15\"\x10/v1/message:send:\x01*\x12k\n\x14SendStreamingMessage\x12\x1a.a2a.v1.SendMessageRequest\x1a\x16.a2a.v1.StreamResponse\"\x1d\x82\xd3\xe4\x93\x02\x17\"\x12/v1/message:stream:\x01*0\x01\x12R\n\x07GetTask\x12\x16.a2a.v1.GetTaskRequest\x1a\x0c.a2a.v1.Task\"!\xda\x41\x04name\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/{name=tasks/*}\x12[\n\nCancelTask\x12\x19.a2a.v1.CancelTaskRequest\x1a\x0c.a2a.v1.Task\"$\x82\xd3\xe4\x93\x02\x1e\"\x19/v1/{name=tasks/*}:cancel:\x01*\x12s\n\x10TaskSubscription\x12\x1f.a2a.v1.TaskSubscriptionRequest\x1a\x16.a2a.v1.StreamResponse\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/{name=tasks/*}:subscribe0\x01\x12\xc4\x01\n CreateTaskPushNotificationConfig\x12/.a2a.v1.CreateTaskPushNotificationConfigRequest\x1a\".a2a.v1.TaskPushNotificationConfig\"K\xda\x41\rparent,config\x82\xd3\xe4\x93\x02\x35\"+/v1/{parent=task/*/pushNotificationConfigs}:\x06\x63onfig\x12\xae\x01\n\x1dGetTaskPushNotificationConfig\x12,.a2a.v1.GetTaskPushNotificationConfigRequest\x1a\".a2a.v1.TaskPushNotificationConfig\";\xda\x41\x04name\x82\xd3\xe4\x93\x02.\x12,/v1/{name=tasks/*/pushNotificationConfigs/*}\x12\xbe\x01\n\x1eListTaskPushNotificationConfig\x12-.a2a.v1.ListTaskPushNotificationConfigRequest\x1a..a2a.v1.ListTaskPushNotificationConfigResponse\"=\xda\x41\x06parent\x82\xd3\xe4\x93\x02.\x12,/v1/{parent=tasks/*}/pushNotificationConfigs\x12P\n\x0cGetAgentCard\x12\x1b.a2a.v1.GetAgentCardRequest\x1a\x11.a2a.v1.AgentCard\"\x10\x82\xd3\xe4\x93\x02\n\x12\x08/v1/card\x12\xa7\x01\n DeleteTaskPushNotificationConfig\x12/.a2a.v1.DeleteTaskPushNotificationConfigRequest\x1a\x16.google.protobuf.Empty\":\xda\x41\x04name\x82\xd3\xe4\x93\x02-*+/v1/{name=tasks/*/pushNotificationConfig/*}Bi\n\ncom.a2a.v1B\x08\x41\x32\x61ProtoP\x01Z\x18google.golang.org/a2a/v1\xa2\x02\x03\x41XX\xaa\x02\x06\x41\x32\x61.V1\xca\x02\x06\x41\x32\x61\\V1\xe2\x02\x12\x41\x32\x61\\V1\\GPBMetadata\xea\x02\x07\x41\x32\x61::V1b\x06proto3')
+-
+-_globals = globals()
+-_builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
+-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'a2a_pb2', _globals)
+-if not _descriptor._USE_C_DESCRIPTORS:
+-  _globals['DESCRIPTOR']._loaded_options = None
+-  _globals['DESCRIPTOR']._serialized_options = b'\n\ncom.a2a.v1B\010A2aProtoP\001Z\030google.golang.org/a2a/v1\242\002\003AXX\252\002\006A2a.V1\312\002\006A2a\\V1\342\002\022A2a\\V1\\GPBMetadata\352\002\007A2a::V1'
+-  _globals['_AGENTCARD_SECURITYSCHEMESENTRY']._loaded_options = None
+-  _globals['_AGENTCARD_SECURITYSCHEMESENTRY']._serialized_options = b'8\001'
+-  _globals['_SECURITY_SCHEMESENTRY']._loaded_options = None
+-  _globals['_SECURITY_SCHEMESENTRY']._serialized_options = b'8\001'
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW_SCOPESENTRY']._loaded_options = None
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW_SCOPESENTRY']._serialized_options = b'8\001'
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW_SCOPESENTRY']._loaded_options = None
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW_SCOPESENTRY']._serialized_options = b'8\001'
+-  _globals['_IMPLICITOAUTHFLOW_SCOPESENTRY']._loaded_options = None
+-  _globals['_IMPLICITOAUTHFLOW_SCOPESENTRY']._serialized_options = b'8\001'
+-  _globals['_PASSWORDOAUTHFLOW_SCOPESENTRY']._loaded_options = None
+-  _globals['_PASSWORDOAUTHFLOW_SCOPESENTRY']._serialized_options = b'8\001'
+-  _globals['_SENDMESSAGEREQUEST'].fields_by_name['request']._loaded_options = None
+-  _globals['_SENDMESSAGEREQUEST'].fields_by_name['request']._serialized_options = b'\340A\002'
+-  _globals['_GETTASKREQUEST'].fields_by_name['name']._loaded_options = None
+-  _globals['_GETTASKREQUEST'].fields_by_name['name']._serialized_options = b'\340A\002'
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['parent']._loaded_options = None
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['parent']._serialized_options = b'\340A\002'
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['config_id']._loaded_options = None
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['config_id']._serialized_options = b'\340A\002'
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['config']._loaded_options = None
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST'].fields_by_name['config']._serialized_options = b'\340A\002'
+-  _globals['_A2ASERVICE'].methods_by_name['SendMessage']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['SendMessage']._serialized_options = b'\202\323\344\223\002\025\"\020/v1/message:send:\001*'
+-  _globals['_A2ASERVICE'].methods_by_name['SendStreamingMessage']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['SendStreamingMessage']._serialized_options = b'\202\323\344\223\002\027\"\022/v1/message:stream:\001*'
+-  _globals['_A2ASERVICE'].methods_by_name['GetTask']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['GetTask']._serialized_options = b'\332A\004name\202\323\344\223\002\024\022\022/v1/{name=tasks/*}'
+-  _globals['_A2ASERVICE'].methods_by_name['CancelTask']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['CancelTask']._serialized_options = b'\202\323\344\223\002\036\"\031/v1/{name=tasks/*}:cancel:\001*'
+-  _globals['_A2ASERVICE'].methods_by_name['TaskSubscription']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['TaskSubscription']._serialized_options = b'\202\323\344\223\002\036\022\034/v1/{name=tasks/*}:subscribe'
+-  _globals['_A2ASERVICE'].methods_by_name['CreateTaskPushNotificationConfig']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['CreateTaskPushNotificationConfig']._serialized_options = b'\332A\rparent,config\202\323\344\223\0025\"+/v1/{parent=task/*/pushNotificationConfigs}:\006config'
+-  _globals['_A2ASERVICE'].methods_by_name['GetTaskPushNotificationConfig']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['GetTaskPushNotificationConfig']._serialized_options = b'\332A\004name\202\323\344\223\002.\022,/v1/{name=tasks/*/pushNotificationConfigs/*}'
+-  _globals['_A2ASERVICE'].methods_by_name['ListTaskPushNotificationConfig']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['ListTaskPushNotificationConfig']._serialized_options = b'\332A\006parent\202\323\344\223\002.\022,/v1/{parent=tasks/*}/pushNotificationConfigs'
+-  _globals['_A2ASERVICE'].methods_by_name['GetAgentCard']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['GetAgentCard']._serialized_options = b'\202\323\344\223\002\n\022\010/v1/card'
+-  _globals['_A2ASERVICE'].methods_by_name['DeleteTaskPushNotificationConfig']._loaded_options = None
+-  _globals['_A2ASERVICE'].methods_by_name['DeleteTaskPushNotificationConfig']._serialized_options = b'\332A\004name\202\323\344\223\002-*+/v1/{name=tasks/*/pushNotificationConfig/*}'
+-  _globals['_TASKSTATE']._serialized_start=7469
+-  _globals['_TASKSTATE']._serialized_end=7719
+-  _globals['_ROLE']._serialized_start=7721
+-  _globals['_ROLE']._serialized_end=7780
+-  _globals['_SENDMESSAGECONFIGURATION']._serialized_start=202
+-  _globals['_SENDMESSAGECONFIGURATION']._serialized_end=424
+-  _globals['_TASK']._serialized_start=427
+-  _globals['_TASK']._serialized_end=668
+-  _globals['_TASKSTATUS']._serialized_start=671
+-  _globals['_TASKSTATUS']._serialized_end=823
+-  _globals['_PART']._serialized_start=825
+-  _globals['_PART']._serialized_end=941
+-  _globals['_FILEPART']._serialized_start=943
+-  _globals['_FILEPART']._serialized_end=1070
+-  _globals['_DATAPART']._serialized_start=1072
+-  _globals['_DATAPART']._serialized_end=1127
+-  _globals['_MESSAGE']._serialized_start=1130
+-  _globals['_MESSAGE']._serialized_end=1385
+-  _globals['_ARTIFACT']._serialized_start=1388
+-  _globals['_ARTIFACT']._serialized_end=1606
+-  _globals['_TASKSTATUSUPDATEEVENT']._serialized_start=1609
+-  _globals['_TASKSTATUSUPDATEEVENT']._serialized_end=1807
+-  _globals['_TASKARTIFACTUPDATEEVENT']._serialized_start=1810
+-  _globals['_TASKARTIFACTUPDATEEVENT']._serialized_end=2045
+-  _globals['_PUSHNOTIFICATIONCONFIG']._serialized_start=2048
+-  _globals['_PUSHNOTIFICATIONCONFIG']._serialized_end=2196
+-  _globals['_AUTHENTICATIONINFO']._serialized_start=2198
+-  _globals['_AUTHENTICATIONINFO']._serialized_end=2278
+-  _globals['_AGENTINTERFACE']._serialized_start=2280
+-  _globals['_AGENTINTERFACE']._serialized_end=2344
+-  _globals['_AGENTCARD']._serialized_start=2347
+-  _globals['_AGENTCARD']._serialized_end=3185
+-  _globals['_AGENTCARD_SECURITYSCHEMESENTRY']._serialized_start=3095
+-  _globals['_AGENTCARD_SECURITYSCHEMESENTRY']._serialized_end=3185
+-  _globals['_AGENTPROVIDER']._serialized_start=3187
+-  _globals['_AGENTPROVIDER']._serialized_end=3256
+-  _globals['_AGENTCAPABILITIES']._serialized_start=3259
+-  _globals['_AGENTCAPABILITIES']._serialized_end=3411
+-  _globals['_AGENTEXTENSION']._serialized_start=3414
+-  _globals['_AGENTEXTENSION']._serialized_end=3559
+-  _globals['_AGENTSKILL']._serialized_start=3562
+-  _globals['_AGENTSKILL']._serialized_end=3760
+-  _globals['_TASKPUSHNOTIFICATIONCONFIG']._serialized_start=3763
+-  _globals['_TASKPUSHNOTIFICATIONCONFIG']._serialized_end=3901
+-  _globals['_STRINGLIST']._serialized_start=3903
+-  _globals['_STRINGLIST']._serialized_end=3935
+-  _globals['_SECURITY']._serialized_start=3938
+-  _globals['_SECURITY']._serialized_end=4085
+-  _globals['_SECURITY_SCHEMESENTRY']._serialized_start=4007
+-  _globals['_SECURITY_SCHEMESENTRY']._serialized_end=4085
+-  _globals['_SECURITYSCHEME']._serialized_start=4088
+-  _globals['_SECURITYSCHEME']._serialized_end=4489
+-  _globals['_APIKEYSECURITYSCHEME']._serialized_start=4491
+-  _globals['_APIKEYSECURITYSCHEME']._serialized_end=4595
+-  _globals['_HTTPAUTHSECURITYSCHEME']._serialized_start=4597
+-  _globals['_HTTPAUTHSECURITYSCHEME']._serialized_end=4716
+-  _globals['_OAUTH2SECURITYSCHEME']._serialized_start=4718
+-  _globals['_OAUTH2SECURITYSCHEME']._serialized_end=4816
+-  _globals['_OPENIDCONNECTSECURITYSCHEME']._serialized_start=4818
+-  _globals['_OPENIDCONNECTSECURITYSCHEME']._serialized_end=4928
+-  _globals['_OAUTHFLOWS']._serialized_start=4931
+-  _globals['_OAUTHFLOWS']._serialized_end=5235
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW']._serialized_start=5238
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW']._serialized_end=5504
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW_SCOPESENTRY']._serialized_start=5447
+-  _globals['_AUTHORIZATIONCODEOAUTHFLOW_SCOPESENTRY']._serialized_end=5504
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW']._serialized_start=5507
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW']._serialized_end=5728
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW_SCOPESENTRY']._serialized_start=5447
+-  _globals['_CLIENTCREDENTIALSOAUTHFLOW_SCOPESENTRY']._serialized_end=5504
+-  _globals['_IMPLICITOAUTHFLOW']._serialized_start=5731
+-  _globals['_IMPLICITOAUTHFLOW']._serialized_end=5950
+-  _globals['_IMPLICITOAUTHFLOW_SCOPESENTRY']._serialized_start=5447
+-  _globals['_IMPLICITOAUTHFLOW_SCOPESENTRY']._serialized_end=5504
+-  _globals['_PASSWORDOAUTHFLOW']._serialized_start=5953
+-  _globals['_PASSWORDOAUTHFLOW']._serialized_end=6156
+-  _globals['_PASSWORDOAUTHFLOW_SCOPESENTRY']._serialized_start=5447
+-  _globals['_PASSWORDOAUTHFLOW_SCOPESENTRY']._serialized_end=5504
+-  _globals['_SENDMESSAGEREQUEST']._serialized_start=6159
+-  _globals['_SENDMESSAGEREQUEST']._serialized_end=6352
+-  _globals['_GETTASKREQUEST']._serialized_start=6354
+-  _globals['_GETTASKREQUEST']._serialized_end=6434
+-  _globals['_CANCELTASKREQUEST']._serialized_start=6436
+-  _globals['_CANCELTASKREQUEST']._serialized_end=6475
+-  _globals['_GETTASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_start=6477
+-  _globals['_GETTASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_end=6535
+-  _globals['_DELETETASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_start=6537
+-  _globals['_DELETETASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_end=6598
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_start=6601
+-  _globals['_CREATETASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_end=6770
+-  _globals['_TASKSUBSCRIPTIONREQUEST']._serialized_start=6772
+-  _globals['_TASKSUBSCRIPTIONREQUEST']._serialized_end=6817
+-  _globals['_LISTTASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_start=6819
+-  _globals['_LISTTASKPUSHNOTIFICATIONCONFIGREQUEST']._serialized_end=6942
+-  _globals['_GETAGENTCARDREQUEST']._serialized_start=6944
+-  _globals['_GETAGENTCARDREQUEST']._serialized_end=6965
+-  _globals['_SENDMESSAGERESPONSE']._serialized_start=6967
+-  _globals['_SENDMESSAGERESPONSE']._serialized_end=7072
+-  _globals['_STREAMRESPONSE']._serialized_start=7075
+-  _globals['_STREAMRESPONSE']._serialized_end=7321
+-  _globals['_LISTTASKPUSHNOTIFICATIONCONFIGRESPONSE']._serialized_start=7324
+-  _globals['_LISTTASKPUSHNOTIFICATIONCONFIGRESPONSE']._serialized_end=7466
+-  _globals['_A2ASERVICE']._serialized_start=7783
+-  _globals['_A2ASERVICE']._serialized_end=9120
+-# @@protoc_insertion_point(module_scope)
+diff --git a/src/a2a/grpc/a2a_pb2.pyi b/src/a2a/grpc/a2a_pb2.pyi
+deleted file mode 100644
+index bbaaffd..0000000
+--- a/src/a2a/grpc/a2a_pb2.pyi
++++ /dev/null
+@@ -1,542 +0,0 @@
+-import datetime
+-
+-from google.api import annotations_pb2 as _annotations_pb2
+-from google.api import client_pb2 as _client_pb2
+-from google.api import field_behavior_pb2 as _field_behavior_pb2
+-from google.protobuf import empty_pb2 as _empty_pb2
+-from google.protobuf import struct_pb2 as _struct_pb2
+-from google.protobuf import timestamp_pb2 as _timestamp_pb2
+-from google.protobuf.internal import containers as _containers
+-from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
+-from google.protobuf import descriptor as _descriptor
+-from google.protobuf import message as _message
+-from collections.abc import Iterable as _Iterable, Mapping as _Mapping
+-from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
+-
+-DESCRIPTOR: _descriptor.FileDescriptor
+-
+-class TaskState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+-    __slots__ = ()
+-    TASK_STATE_UNSPECIFIED: _ClassVar[TaskState]
+-    TASK_STATE_SUBMITTED: _ClassVar[TaskState]
+-    TASK_STATE_WORKING: _ClassVar[TaskState]
+-    TASK_STATE_COMPLETED: _ClassVar[TaskState]
+-    TASK_STATE_FAILED: _ClassVar[TaskState]
+-    TASK_STATE_CANCELLED: _ClassVar[TaskState]
+-    TASK_STATE_INPUT_REQUIRED: _ClassVar[TaskState]
+-    TASK_STATE_REJECTED: _ClassVar[TaskState]
+-    TASK_STATE_AUTH_REQUIRED: _ClassVar[TaskState]
+-
+-class Role(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+-    __slots__ = ()
+-    ROLE_UNSPECIFIED: _ClassVar[Role]
+-    ROLE_USER: _ClassVar[Role]
+-    ROLE_AGENT: _ClassVar[Role]
+-TASK_STATE_UNSPECIFIED: TaskState
+-TASK_STATE_SUBMITTED: TaskState
+-TASK_STATE_WORKING: TaskState
+-TASK_STATE_COMPLETED: TaskState
+-TASK_STATE_FAILED: TaskState
+-TASK_STATE_CANCELLED: TaskState
+-TASK_STATE_INPUT_REQUIRED: TaskState
+-TASK_STATE_REJECTED: TaskState
+-TASK_STATE_AUTH_REQUIRED: TaskState
+-ROLE_UNSPECIFIED: Role
+-ROLE_USER: Role
+-ROLE_AGENT: Role
+-
+-class SendMessageConfiguration(_message.Message):
+-    __slots__ = ("accepted_output_modes", "push_notification", "history_length", "blocking")
+-    ACCEPTED_OUTPUT_MODES_FIELD_NUMBER: _ClassVar[int]
+-    PUSH_NOTIFICATION_FIELD_NUMBER: _ClassVar[int]
+-    HISTORY_LENGTH_FIELD_NUMBER: _ClassVar[int]
+-    BLOCKING_FIELD_NUMBER: _ClassVar[int]
+-    accepted_output_modes: _containers.RepeatedScalarFieldContainer[str]
+-    push_notification: PushNotificationConfig
+-    history_length: int
+-    blocking: bool
+-    def __init__(self, accepted_output_modes: _Optional[_Iterable[str]] = ..., push_notification: _Optional[_Union[PushNotificationConfig, _Mapping]] = ..., history_length: _Optional[int] = ..., blocking: bool = ...) -> None: ...
+-
+-class Task(_message.Message):
+-    __slots__ = ("id", "context_id", "status", "artifacts", "history", "metadata")
+-    ID_FIELD_NUMBER: _ClassVar[int]
+-    CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
+-    STATUS_FIELD_NUMBER: _ClassVar[int]
+-    ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
+-    HISTORY_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    id: str
+-    context_id: str
+-    status: TaskStatus
+-    artifacts: _containers.RepeatedCompositeFieldContainer[Artifact]
+-    history: _containers.RepeatedCompositeFieldContainer[Message]
+-    metadata: _struct_pb2.Struct
+-    def __init__(self, id: _Optional[str] = ..., context_id: _Optional[str] = ..., status: _Optional[_Union[TaskStatus, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[Artifact, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[Message, _Mapping]]] = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class TaskStatus(_message.Message):
+-    __slots__ = ("state", "update", "timestamp")
+-    STATE_FIELD_NUMBER: _ClassVar[int]
+-    UPDATE_FIELD_NUMBER: _ClassVar[int]
+-    TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
+-    state: TaskState
+-    update: Message
+-    timestamp: _timestamp_pb2.Timestamp
+-    def __init__(self, state: _Optional[_Union[TaskState, str]] = ..., update: _Optional[_Union[Message, _Mapping]] = ..., timestamp: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+-
+-class Part(_message.Message):
+-    __slots__ = ("text", "file", "data")
+-    TEXT_FIELD_NUMBER: _ClassVar[int]
+-    FILE_FIELD_NUMBER: _ClassVar[int]
+-    DATA_FIELD_NUMBER: _ClassVar[int]
+-    text: str
+-    file: FilePart
+-    data: DataPart
+-    def __init__(self, text: _Optional[str] = ..., file: _Optional[_Union[FilePart, _Mapping]] = ..., data: _Optional[_Union[DataPart, _Mapping]] = ...) -> None: ...
+-
+-class FilePart(_message.Message):
+-    __slots__ = ("file_with_uri", "file_with_bytes", "mime_type")
+-    FILE_WITH_URI_FIELD_NUMBER: _ClassVar[int]
+-    FILE_WITH_BYTES_FIELD_NUMBER: _ClassVar[int]
+-    MIME_TYPE_FIELD_NUMBER: _ClassVar[int]
+-    file_with_uri: str
+-    file_with_bytes: bytes
+-    mime_type: str
+-    def __init__(self, file_with_uri: _Optional[str] = ..., file_with_bytes: _Optional[bytes] = ..., mime_type: _Optional[str] = ...) -> None: ...
+-
+-class DataPart(_message.Message):
+-    __slots__ = ("data",)
+-    DATA_FIELD_NUMBER: _ClassVar[int]
+-    data: _struct_pb2.Struct
+-    def __init__(self, data: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class Message(_message.Message):
+-    __slots__ = ("message_id", "context_id", "task_id", "role", "content", "metadata", "extensions")
+-    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+-    CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
+-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+-    ROLE_FIELD_NUMBER: _ClassVar[int]
+-    CONTENT_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    EXTENSIONS_FIELD_NUMBER: _ClassVar[int]
+-    message_id: str
+-    context_id: str
+-    task_id: str
+-    role: Role
+-    content: _containers.RepeatedCompositeFieldContainer[Part]
+-    metadata: _struct_pb2.Struct
+-    extensions: _containers.RepeatedScalarFieldContainer[str]
+-    def __init__(self, message_id: _Optional[str] = ..., context_id: _Optional[str] = ..., task_id: _Optional[str] = ..., role: _Optional[_Union[Role, str]] = ..., content: _Optional[_Iterable[_Union[Part, _Mapping]]] = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., extensions: _Optional[_Iterable[str]] = ...) -> None: ...
+-
+-class Artifact(_message.Message):
+-    __slots__ = ("artifact_id", "name", "description", "parts", "metadata", "extensions")
+-    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    PARTS_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    EXTENSIONS_FIELD_NUMBER: _ClassVar[int]
+-    artifact_id: str
+-    name: str
+-    description: str
+-    parts: _containers.RepeatedCompositeFieldContainer[Part]
+-    metadata: _struct_pb2.Struct
+-    extensions: _containers.RepeatedScalarFieldContainer[str]
+-    def __init__(self, artifact_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., parts: _Optional[_Iterable[_Union[Part, _Mapping]]] = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., extensions: _Optional[_Iterable[str]] = ...) -> None: ...
+-
+-class TaskStatusUpdateEvent(_message.Message):
+-    __slots__ = ("task_id", "context_id", "status", "final", "metadata")
+-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+-    CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
+-    STATUS_FIELD_NUMBER: _ClassVar[int]
+-    FINAL_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    task_id: str
+-    context_id: str
+-    status: TaskStatus
+-    final: bool
+-    metadata: _struct_pb2.Struct
+-    def __init__(self, task_id: _Optional[str] = ..., context_id: _Optional[str] = ..., status: _Optional[_Union[TaskStatus, _Mapping]] = ..., final: bool = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class TaskArtifactUpdateEvent(_message.Message):
+-    __slots__ = ("task_id", "context_id", "artifact", "append", "last_chunk", "metadata")
+-    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+-    CONTEXT_ID_FIELD_NUMBER: _ClassVar[int]
+-    ARTIFACT_FIELD_NUMBER: _ClassVar[int]
+-    APPEND_FIELD_NUMBER: _ClassVar[int]
+-    LAST_CHUNK_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    task_id: str
+-    context_id: str
+-    artifact: Artifact
+-    append: bool
+-    last_chunk: bool
+-    metadata: _struct_pb2.Struct
+-    def __init__(self, task_id: _Optional[str] = ..., context_id: _Optional[str] = ..., artifact: _Optional[_Union[Artifact, _Mapping]] = ..., append: bool = ..., last_chunk: bool = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class PushNotificationConfig(_message.Message):
+-    __slots__ = ("id", "url", "token", "authentication")
+-    ID_FIELD_NUMBER: _ClassVar[int]
+-    URL_FIELD_NUMBER: _ClassVar[int]
+-    TOKEN_FIELD_NUMBER: _ClassVar[int]
+-    AUTHENTICATION_FIELD_NUMBER: _ClassVar[int]
+-    id: str
+-    url: str
+-    token: str
+-    authentication: AuthenticationInfo
+-    def __init__(self, id: _Optional[str] = ..., url: _Optional[str] = ..., token: _Optional[str] = ..., authentication: _Optional[_Union[AuthenticationInfo, _Mapping]] = ...) -> None: ...
+-
+-class AuthenticationInfo(_message.Message):
+-    __slots__ = ("schemes", "credentials")
+-    SCHEMES_FIELD_NUMBER: _ClassVar[int]
+-    CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
+-    schemes: _containers.RepeatedScalarFieldContainer[str]
+-    credentials: str
+-    def __init__(self, schemes: _Optional[_Iterable[str]] = ..., credentials: _Optional[str] = ...) -> None: ...
+-
+-class AgentInterface(_message.Message):
+-    __slots__ = ("url", "transport")
+-    URL_FIELD_NUMBER: _ClassVar[int]
+-    TRANSPORT_FIELD_NUMBER: _ClassVar[int]
+-    url: str
+-    transport: str
+-    def __init__(self, url: _Optional[str] = ..., transport: _Optional[str] = ...) -> None: ...
+-
+-class AgentCard(_message.Message):
+-    __slots__ = ("name", "description", "url", "preferred_transport", "additional_interfaces", "provider", "version", "documentation_url", "capabilities", "security_schemes", "security", "default_input_modes", "default_output_modes", "skills", "supports_authenticated_extended_card")
+-    class SecuritySchemesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: SecurityScheme
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[SecurityScheme, _Mapping]] = ...) -> None: ...
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    URL_FIELD_NUMBER: _ClassVar[int]
+-    PREFERRED_TRANSPORT_FIELD_NUMBER: _ClassVar[int]
+-    ADDITIONAL_INTERFACES_FIELD_NUMBER: _ClassVar[int]
+-    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+-    VERSION_FIELD_NUMBER: _ClassVar[int]
+-    DOCUMENTATION_URL_FIELD_NUMBER: _ClassVar[int]
+-    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+-    SECURITY_SCHEMES_FIELD_NUMBER: _ClassVar[int]
+-    SECURITY_FIELD_NUMBER: _ClassVar[int]
+-    DEFAULT_INPUT_MODES_FIELD_NUMBER: _ClassVar[int]
+-    DEFAULT_OUTPUT_MODES_FIELD_NUMBER: _ClassVar[int]
+-    SKILLS_FIELD_NUMBER: _ClassVar[int]
+-    SUPPORTS_AUTHENTICATED_EXTENDED_CARD_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    description: str
+-    url: str
+-    preferred_transport: str
+-    additional_interfaces: _containers.RepeatedCompositeFieldContainer[AgentInterface]
+-    provider: AgentProvider
+-    version: str
+-    documentation_url: str
+-    capabilities: AgentCapabilities
+-    security_schemes: _containers.MessageMap[str, SecurityScheme]
+-    security: _containers.RepeatedCompositeFieldContainer[Security]
+-    default_input_modes: _containers.RepeatedScalarFieldContainer[str]
+-    default_output_modes: _containers.RepeatedScalarFieldContainer[str]
+-    skills: _containers.RepeatedCompositeFieldContainer[AgentSkill]
+-    supports_authenticated_extended_card: bool
+-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., url: _Optional[str] = ..., preferred_transport: _Optional[str] = ..., additional_interfaces: _Optional[_Iterable[_Union[AgentInterface, _Mapping]]] = ..., provider: _Optional[_Union[AgentProvider, _Mapping]] = ..., version: _Optional[str] = ..., documentation_url: _Optional[str] = ..., capabilities: _Optional[_Union[AgentCapabilities, _Mapping]] = ..., security_schemes: _Optional[_Mapping[str, SecurityScheme]] = ..., security: _Optional[_Iterable[_Union[Security, _Mapping]]] = ..., default_input_modes: _Optional[_Iterable[str]] = ..., default_output_modes: _Optional[_Iterable[str]] = ..., skills: _Optional[_Iterable[_Union[AgentSkill, _Mapping]]] = ..., supports_authenticated_extended_card: bool = ...) -> None: ...
+-
+-class AgentProvider(_message.Message):
+-    __slots__ = ("url", "organization")
+-    URL_FIELD_NUMBER: _ClassVar[int]
+-    ORGANIZATION_FIELD_NUMBER: _ClassVar[int]
+-    url: str
+-    organization: str
+-    def __init__(self, url: _Optional[str] = ..., organization: _Optional[str] = ...) -> None: ...
+-
+-class AgentCapabilities(_message.Message):
+-    __slots__ = ("streaming", "push_notifications", "extensions")
+-    STREAMING_FIELD_NUMBER: _ClassVar[int]
+-    PUSH_NOTIFICATIONS_FIELD_NUMBER: _ClassVar[int]
+-    EXTENSIONS_FIELD_NUMBER: _ClassVar[int]
+-    streaming: bool
+-    push_notifications: bool
+-    extensions: _containers.RepeatedCompositeFieldContainer[AgentExtension]
+-    def __init__(self, streaming: bool = ..., push_notifications: bool = ..., extensions: _Optional[_Iterable[_Union[AgentExtension, _Mapping]]] = ...) -> None: ...
+-
+-class AgentExtension(_message.Message):
+-    __slots__ = ("uri", "description", "required", "params")
+-    URI_FIELD_NUMBER: _ClassVar[int]
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    REQUIRED_FIELD_NUMBER: _ClassVar[int]
+-    PARAMS_FIELD_NUMBER: _ClassVar[int]
+-    uri: str
+-    description: str
+-    required: bool
+-    params: _struct_pb2.Struct
+-    def __init__(self, uri: _Optional[str] = ..., description: _Optional[str] = ..., required: bool = ..., params: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class AgentSkill(_message.Message):
+-    __slots__ = ("id", "name", "description", "tags", "examples", "input_modes", "output_modes")
+-    ID_FIELD_NUMBER: _ClassVar[int]
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    TAGS_FIELD_NUMBER: _ClassVar[int]
+-    EXAMPLES_FIELD_NUMBER: _ClassVar[int]
+-    INPUT_MODES_FIELD_NUMBER: _ClassVar[int]
+-    OUTPUT_MODES_FIELD_NUMBER: _ClassVar[int]
+-    id: str
+-    name: str
+-    description: str
+-    tags: _containers.RepeatedScalarFieldContainer[str]
+-    examples: _containers.RepeatedScalarFieldContainer[str]
+-    input_modes: _containers.RepeatedScalarFieldContainer[str]
+-    output_modes: _containers.RepeatedScalarFieldContainer[str]
+-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ..., examples: _Optional[_Iterable[str]] = ..., input_modes: _Optional[_Iterable[str]] = ..., output_modes: _Optional[_Iterable[str]] = ...) -> None: ...
+-
+-class TaskPushNotificationConfig(_message.Message):
+-    __slots__ = ("name", "push_notification_config")
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    PUSH_NOTIFICATION_CONFIG_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    push_notification_config: PushNotificationConfig
+-    def __init__(self, name: _Optional[str] = ..., push_notification_config: _Optional[_Union[PushNotificationConfig, _Mapping]] = ...) -> None: ...
+-
+-class StringList(_message.Message):
+-    __slots__ = ("list",)
+-    LIST_FIELD_NUMBER: _ClassVar[int]
+-    list: _containers.RepeatedScalarFieldContainer[str]
+-    def __init__(self, list: _Optional[_Iterable[str]] = ...) -> None: ...
+-
+-class Security(_message.Message):
+-    __slots__ = ("schemes",)
+-    class SchemesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: StringList
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[StringList, _Mapping]] = ...) -> None: ...
+-    SCHEMES_FIELD_NUMBER: _ClassVar[int]
+-    schemes: _containers.MessageMap[str, StringList]
+-    def __init__(self, schemes: _Optional[_Mapping[str, StringList]] = ...) -> None: ...
+-
+-class SecurityScheme(_message.Message):
+-    __slots__ = ("api_key_security_scheme", "http_auth_security_scheme", "oauth2_security_scheme", "open_id_connect_security_scheme")
+-    API_KEY_SECURITY_SCHEME_FIELD_NUMBER: _ClassVar[int]
+-    HTTP_AUTH_SECURITY_SCHEME_FIELD_NUMBER: _ClassVar[int]
+-    OAUTH2_SECURITY_SCHEME_FIELD_NUMBER: _ClassVar[int]
+-    OPEN_ID_CONNECT_SECURITY_SCHEME_FIELD_NUMBER: _ClassVar[int]
+-    api_key_security_scheme: APIKeySecurityScheme
+-    http_auth_security_scheme: HTTPAuthSecurityScheme
+-    oauth2_security_scheme: OAuth2SecurityScheme
+-    open_id_connect_security_scheme: OpenIdConnectSecurityScheme
+-    def __init__(self, api_key_security_scheme: _Optional[_Union[APIKeySecurityScheme, _Mapping]] = ..., http_auth_security_scheme: _Optional[_Union[HTTPAuthSecurityScheme, _Mapping]] = ..., oauth2_security_scheme: _Optional[_Union[OAuth2SecurityScheme, _Mapping]] = ..., open_id_connect_security_scheme: _Optional[_Union[OpenIdConnectSecurityScheme, _Mapping]] = ...) -> None: ...
+-
+-class APIKeySecurityScheme(_message.Message):
+-    __slots__ = ("description", "location", "name")
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    LOCATION_FIELD_NUMBER: _ClassVar[int]
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    description: str
+-    location: str
+-    name: str
+-    def __init__(self, description: _Optional[str] = ..., location: _Optional[str] = ..., name: _Optional[str] = ...) -> None: ...
+-
+-class HTTPAuthSecurityScheme(_message.Message):
+-    __slots__ = ("description", "scheme", "bearer_format")
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    SCHEME_FIELD_NUMBER: _ClassVar[int]
+-    BEARER_FORMAT_FIELD_NUMBER: _ClassVar[int]
+-    description: str
+-    scheme: str
+-    bearer_format: str
+-    def __init__(self, description: _Optional[str] = ..., scheme: _Optional[str] = ..., bearer_format: _Optional[str] = ...) -> None: ...
+-
+-class OAuth2SecurityScheme(_message.Message):
+-    __slots__ = ("description", "flows")
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    FLOWS_FIELD_NUMBER: _ClassVar[int]
+-    description: str
+-    flows: OAuthFlows
+-    def __init__(self, description: _Optional[str] = ..., flows: _Optional[_Union[OAuthFlows, _Mapping]] = ...) -> None: ...
+-
+-class OpenIdConnectSecurityScheme(_message.Message):
+-    __slots__ = ("description", "open_id_connect_url")
+-    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+-    OPEN_ID_CONNECT_URL_FIELD_NUMBER: _ClassVar[int]
+-    description: str
+-    open_id_connect_url: str
+-    def __init__(self, description: _Optional[str] = ..., open_id_connect_url: _Optional[str] = ...) -> None: ...
+-
+-class OAuthFlows(_message.Message):
+-    __slots__ = ("authorization_code", "client_credentials", "implicit", "password")
+-    AUTHORIZATION_CODE_FIELD_NUMBER: _ClassVar[int]
+-    CLIENT_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
+-    IMPLICIT_FIELD_NUMBER: _ClassVar[int]
+-    PASSWORD_FIELD_NUMBER: _ClassVar[int]
+-    authorization_code: AuthorizationCodeOAuthFlow
+-    client_credentials: ClientCredentialsOAuthFlow
+-    implicit: ImplicitOAuthFlow
+-    password: PasswordOAuthFlow
+-    def __init__(self, authorization_code: _Optional[_Union[AuthorizationCodeOAuthFlow, _Mapping]] = ..., client_credentials: _Optional[_Union[ClientCredentialsOAuthFlow, _Mapping]] = ..., implicit: _Optional[_Union[ImplicitOAuthFlow, _Mapping]] = ..., password: _Optional[_Union[PasswordOAuthFlow, _Mapping]] = ...) -> None: ...
+-
+-class AuthorizationCodeOAuthFlow(_message.Message):
+-    __slots__ = ("authorization_url", "token_url", "refresh_url", "scopes")
+-    class ScopesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: str
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+-    AUTHORIZATION_URL_FIELD_NUMBER: _ClassVar[int]
+-    TOKEN_URL_FIELD_NUMBER: _ClassVar[int]
+-    REFRESH_URL_FIELD_NUMBER: _ClassVar[int]
+-    SCOPES_FIELD_NUMBER: _ClassVar[int]
+-    authorization_url: str
+-    token_url: str
+-    refresh_url: str
+-    scopes: _containers.ScalarMap[str, str]
+-    def __init__(self, authorization_url: _Optional[str] = ..., token_url: _Optional[str] = ..., refresh_url: _Optional[str] = ..., scopes: _Optional[_Mapping[str, str]] = ...) -> None: ...
+-
+-class ClientCredentialsOAuthFlow(_message.Message):
+-    __slots__ = ("token_url", "refresh_url", "scopes")
+-    class ScopesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: str
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+-    TOKEN_URL_FIELD_NUMBER: _ClassVar[int]
+-    REFRESH_URL_FIELD_NUMBER: _ClassVar[int]
+-    SCOPES_FIELD_NUMBER: _ClassVar[int]
+-    token_url: str
+-    refresh_url: str
+-    scopes: _containers.ScalarMap[str, str]
+-    def __init__(self, token_url: _Optional[str] = ..., refresh_url: _Optional[str] = ..., scopes: _Optional[_Mapping[str, str]] = ...) -> None: ...
+-
+-class ImplicitOAuthFlow(_message.Message):
+-    __slots__ = ("authorization_url", "refresh_url", "scopes")
+-    class ScopesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: str
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+-    AUTHORIZATION_URL_FIELD_NUMBER: _ClassVar[int]
+-    REFRESH_URL_FIELD_NUMBER: _ClassVar[int]
+-    SCOPES_FIELD_NUMBER: _ClassVar[int]
+-    authorization_url: str
+-    refresh_url: str
+-    scopes: _containers.ScalarMap[str, str]
+-    def __init__(self, authorization_url: _Optional[str] = ..., refresh_url: _Optional[str] = ..., scopes: _Optional[_Mapping[str, str]] = ...) -> None: ...
+-
+-class PasswordOAuthFlow(_message.Message):
+-    __slots__ = ("token_url", "refresh_url", "scopes")
+-    class ScopesEntry(_message.Message):
+-        __slots__ = ("key", "value")
+-        KEY_FIELD_NUMBER: _ClassVar[int]
+-        VALUE_FIELD_NUMBER: _ClassVar[int]
+-        key: str
+-        value: str
+-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+-    TOKEN_URL_FIELD_NUMBER: _ClassVar[int]
+-    REFRESH_URL_FIELD_NUMBER: _ClassVar[int]
+-    SCOPES_FIELD_NUMBER: _ClassVar[int]
+-    token_url: str
+-    refresh_url: str
+-    scopes: _containers.ScalarMap[str, str]
+-    def __init__(self, token_url: _Optional[str] = ..., refresh_url: _Optional[str] = ..., scopes: _Optional[_Mapping[str, str]] = ...) -> None: ...
+-
+-class SendMessageRequest(_message.Message):
+-    __slots__ = ("request", "configuration", "metadata")
+-    REQUEST_FIELD_NUMBER: _ClassVar[int]
+-    CONFIGURATION_FIELD_NUMBER: _ClassVar[int]
+-    METADATA_FIELD_NUMBER: _ClassVar[int]
+-    request: Message
+-    configuration: SendMessageConfiguration
+-    metadata: _struct_pb2.Struct
+-    def __init__(self, request: _Optional[_Union[Message, _Mapping]] = ..., configuration: _Optional[_Union[SendMessageConfiguration, _Mapping]] = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+-
+-class GetTaskRequest(_message.Message):
+-    __slots__ = ("name", "history_length")
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    HISTORY_LENGTH_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    history_length: int
+-    def __init__(self, name: _Optional[str] = ..., history_length: _Optional[int] = ...) -> None: ...
+-
+-class CancelTaskRequest(_message.Message):
+-    __slots__ = ("name",)
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    def __init__(self, name: _Optional[str] = ...) -> None: ...
+-
+-class GetTaskPushNotificationConfigRequest(_message.Message):
+-    __slots__ = ("name",)
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    def __init__(self, name: _Optional[str] = ...) -> None: ...
+-
+-class DeleteTaskPushNotificationConfigRequest(_message.Message):
+-    __slots__ = ("name",)
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    def __init__(self, name: _Optional[str] = ...) -> None: ...
+-
+-class CreateTaskPushNotificationConfigRequest(_message.Message):
+-    __slots__ = ("parent", "config_id", "config")
+-    PARENT_FIELD_NUMBER: _ClassVar[int]
+-    CONFIG_ID_FIELD_NUMBER: _ClassVar[int]
+-    CONFIG_FIELD_NUMBER: _ClassVar[int]
+-    parent: str
+-    config_id: str
+-    config: TaskPushNotificationConfig
+-    def __init__(self, parent: _Optional[str] = ..., config_id: _Optional[str] = ..., config: _Optional[_Union[TaskPushNotificationConfig, _Mapping]] = ...) -> None: ...
+-
+-class TaskSubscriptionRequest(_message.Message):
+-    __slots__ = ("name",)
+-    NAME_FIELD_NUMBER: _ClassVar[int]
+-    name: str
+-    def __init__(self, name: _Optional[str] = ...) -> None: ...
+-
+-class ListTaskPushNotificationConfigRequest(_message.Message):
+-    __slots__ = ("parent", "page_size", "page_token")
+-    PARENT_FIELD_NUMBER: _ClassVar[int]
+-    PAGE_SIZE_FIELD_NUMBER: _ClassVar[int]
+-    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+-    parent: str
+-    page_size: int
+-    page_token: str
+-    def __init__(self, parent: _Optional[str] = ..., page_size: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+-
+-class GetAgentCardRequest(_message.Message):
+-    __slots__ = ()
+-    def __init__(self) -> None: ...
+-
+-class SendMessageResponse(_message.Message):
+-    __slots__ = ("task", "msg")
+-    TASK_FIELD_NUMBER: _ClassVar[int]
+-    MSG_FIELD_NUMBER: _ClassVar[int]
+-    task: Task
+-    msg: Message
+-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., msg: _Optional[_Union[Message, _Mapping]] = ...) -> None: ...
+-
+-class StreamResponse(_message.Message):
+-    __slots__ = ("task", "msg", "status_update", "artifact_update")
+-    TASK_FIELD_NUMBER: _ClassVar[int]
+-    MSG_FIELD_NUMBER: _ClassVar[int]
+-    STATUS_UPDATE_FIELD_NUMBER: _ClassVar[int]
+-    ARTIFACT_UPDATE_FIELD_NUMBER: _ClassVar[int]
+-    task: Task
+-    msg: Message
+-    status_update: TaskStatusUpdateEvent
+-    artifact_update: TaskArtifactUpdateEvent
+-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., msg: _Optional[_Union[Message, _Mapping]] = ..., status_update: _Optional[_Union[TaskStatusUpdateEvent, _Mapping]] = ..., artifact_update: _Optional[_Union[TaskArtifactUpdateEvent, _Mapping]] = ...) -> None: ...
+-
+-class ListTaskPushNotificationConfigResponse(_message.Message):
+-    __slots__ = ("configs", "next_page_token")
+-    CONFIGS_FIELD_NUMBER: _ClassVar[int]
+-    NEXT_PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+-    configs: _containers.RepeatedCompositeFieldContainer[TaskPushNotificationConfig]
+-    next_page_token: str
+-    def __init__(self, configs: _Optional[_Iterable[_Union[TaskPushNotificationConfig, _Mapping]]] = ..., next_page_token: _Optional[str] = ...) -> None: ...
+diff --git a/src/a2a/grpc/a2a_pb2_grpc.py b/src/a2a/grpc/a2a_pb2_grpc.py
+deleted file mode 100644
+index 6f3ef26..0000000
+--- a/src/a2a/grpc/a2a_pb2_grpc.py
++++ /dev/null
+@@ -1,520 +0,0 @@
+-# Generated by the gRPC Python protocol compiler plugin. DO NOT EDIT!
+-"""Client and server classes corresponding to protobuf-defined services."""
+-import grpc
+-
+-from . import a2a_pb2 as a2a__pb2
+-from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
+-
+-
+-class A2AServiceStub(object):
+-    """A2AService defines the gRPC version of the A2A protocol. This has a slightly
+-    different shape than the JSONRPC version to better conform to AIP-127,
+-    where appropriate. The nouns are AgentCard, Message, Task and
+-    TaskPushNotificationConfig.
+-    - Messages are not a standard resource so there is no get/delete/update/list
+-    interface, only a send and stream custom methods.
+-    - Tasks have a get interface and custom cancel and subscribe methods.
+-    - TaskPushNotificationConfig are a resource whose parent is a task. 
+-    They have get, list and create methods.
+-    - AgentCard is a static resource with only a get method.
+-    fields are not present as they don't comply with AIP rules, and the
+-    optional history_length on the get task method is not present as it also
+-    violates AIP-127 and AIP-131.
+-    """
+-
+-    def __init__(self, channel):
+-        """Constructor.
+-
+-        Args:
+-            channel: A grpc.Channel.
+-        """
+-        self.SendMessage = channel.unary_unary(
+-                '/a2a.v1.A2AService/SendMessage',
+-                request_serializer=a2a__pb2.SendMessageRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.SendMessageResponse.FromString,
+-                _registered_method=True)
+-        self.SendStreamingMessage = channel.unary_stream(
+-                '/a2a.v1.A2AService/SendStreamingMessage',
+-                request_serializer=a2a__pb2.SendMessageRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.StreamResponse.FromString,
+-                _registered_method=True)
+-        self.GetTask = channel.unary_unary(
+-                '/a2a.v1.A2AService/GetTask',
+-                request_serializer=a2a__pb2.GetTaskRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.Task.FromString,
+-                _registered_method=True)
+-        self.CancelTask = channel.unary_unary(
+-                '/a2a.v1.A2AService/CancelTask',
+-                request_serializer=a2a__pb2.CancelTaskRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.Task.FromString,
+-                _registered_method=True)
+-        self.TaskSubscription = channel.unary_stream(
+-                '/a2a.v1.A2AService/TaskSubscription',
+-                request_serializer=a2a__pb2.TaskSubscriptionRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.StreamResponse.FromString,
+-                _registered_method=True)
+-        self.CreateTaskPushNotificationConfig = channel.unary_unary(
+-                '/a2a.v1.A2AService/CreateTaskPushNotificationConfig',
+-                request_serializer=a2a__pb2.CreateTaskPushNotificationConfigRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.TaskPushNotificationConfig.FromString,
+-                _registered_method=True)
+-        self.GetTaskPushNotificationConfig = channel.unary_unary(
+-                '/a2a.v1.A2AService/GetTaskPushNotificationConfig',
+-                request_serializer=a2a__pb2.GetTaskPushNotificationConfigRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.TaskPushNotificationConfig.FromString,
+-                _registered_method=True)
+-        self.ListTaskPushNotificationConfig = channel.unary_unary(
+-                '/a2a.v1.A2AService/ListTaskPushNotificationConfig',
+-                request_serializer=a2a__pb2.ListTaskPushNotificationConfigRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.ListTaskPushNotificationConfigResponse.FromString,
+-                _registered_method=True)
+-        self.GetAgentCard = channel.unary_unary(
+-                '/a2a.v1.A2AService/GetAgentCard',
+-                request_serializer=a2a__pb2.GetAgentCardRequest.SerializeToString,
+-                response_deserializer=a2a__pb2.AgentCard.FromString,
+-                _registered_method=True)
+-        self.DeleteTaskPushNotificationConfig = channel.unary_unary(
+-                '/a2a.v1.A2AService/DeleteTaskPushNotificationConfig',
+-                request_serializer=a2a__pb2.DeleteTaskPushNotificationConfigRequest.SerializeToString,
+-                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+-                _registered_method=True)
+-
+-
+-class A2AServiceServicer(object):
+-    """A2AService defines the gRPC version of the A2A protocol. This has a slightly
+-    different shape than the JSONRPC version to better conform to AIP-127,
+-    where appropriate. The nouns are AgentCard, Message, Task and
+-    TaskPushNotificationConfig.
+-    - Messages are not a standard resource so there is no get/delete/update/list
+-    interface, only a send and stream custom methods.
+-    - Tasks have a get interface and custom cancel and subscribe methods.
+-    - TaskPushNotificationConfig are a resource whose parent is a task. 
+-    They have get, list and create methods.
+-    - AgentCard is a static resource with only a get method.
+-    fields are not present as they don't comply with AIP rules, and the
+-    optional history_length on the get task method is not present as it also
+-    violates AIP-127 and AIP-131.
+-    """
+-
+-    def SendMessage(self, request, context):
+-        """Send a message to the agent. This is a blocking call that will return the
+-        task once it is completed, or a LRO if requested.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def SendStreamingMessage(self, request, context):
+-        """SendStreamingMessage is a streaming call that will return a stream of
+-        task update events until the Task is in an interrupted or terminal state.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def GetTask(self, request, context):
+-        """Get the current state of a task from the agent.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def CancelTask(self, request, context):
+-        """Cancel a task from the agent. If supported one should expect no
+-        more task updates for the task.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def TaskSubscription(self, request, context):
+-        """TaskSubscription is a streaming call that will return a stream of task
+-        update events. This attaches the stream to an existing in process task.
+-        If the task is complete the stream will return the completed task (like
+-        GetTask) and close the stream.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def CreateTaskPushNotificationConfig(self, request, context):
+-        """Set a push notification config for a task.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def GetTaskPushNotificationConfig(self, request, context):
+-        """Get a push notification config for a task.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def ListTaskPushNotificationConfig(self, request, context):
+-        """Get a list of push notifications configured for a task.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def GetAgentCard(self, request, context):
+-        """GetAgentCard returns the agent card for the agent.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-    def DeleteTaskPushNotificationConfig(self, request, context):
+-        """Delete a push notification config for a task.
+-        """
+-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+-        context.set_details('Method not implemented!')
+-        raise NotImplementedError('Method not implemented!')
+-
+-
+-def add_A2AServiceServicer_to_server(servicer, server):
+-    rpc_method_handlers = {
+-            'SendMessage': grpc.unary_unary_rpc_method_handler(
+-                    servicer.SendMessage,
+-                    request_deserializer=a2a__pb2.SendMessageRequest.FromString,
+-                    response_serializer=a2a__pb2.SendMessageResponse.SerializeToString,
+-            ),
+-            'SendStreamingMessage': grpc.unary_stream_rpc_method_handler(
+-                    servicer.SendStreamingMessage,
+-                    request_deserializer=a2a__pb2.SendMessageRequest.FromString,
+-                    response_serializer=a2a__pb2.StreamResponse.SerializeToString,
+-            ),
+-            'GetTask': grpc.unary_unary_rpc_method_handler(
+-                    servicer.GetTask,
+-                    request_deserializer=a2a__pb2.GetTaskRequest.FromString,
+-                    response_serializer=a2a__pb2.Task.SerializeToString,
+-            ),
+-            'CancelTask': grpc.unary_unary_rpc_method_handler(
+-                    servicer.CancelTask,
+-                    request_deserializer=a2a__pb2.CancelTaskRequest.FromString,
+-                    response_serializer=a2a__pb2.Task.SerializeToString,
+-            ),
+-            'TaskSubscription': grpc.unary_stream_rpc_method_handler(
+-                    servicer.TaskSubscription,
+-                    request_deserializer=a2a__pb2.TaskSubscriptionRequest.FromString,
+-                    response_serializer=a2a__pb2.StreamResponse.SerializeToString,
+-            ),
+-            'CreateTaskPushNotificationConfig': grpc.unary_unary_rpc_method_handler(
+-                    servicer.CreateTaskPushNotificationConfig,
+-                    request_deserializer=a2a__pb2.CreateTaskPushNotificationConfigRequest.FromString,
+-                    response_serializer=a2a__pb2.TaskPushNotificationConfig.SerializeToString,
+-            ),
+-            'GetTaskPushNotificationConfig': grpc.unary_unary_rpc_method_handler(
+-                    servicer.GetTaskPushNotificationConfig,
+-                    request_deserializer=a2a__pb2.GetTaskPushNotificationConfigRequest.FromString,
+-                    response_serializer=a2a__pb2.TaskPushNotificationConfig.SerializeToString,
+-            ),
+-            'ListTaskPushNotificationConfig': grpc.unary_unary_rpc_method_handler(
+-                    servicer.ListTaskPushNotificationConfig,
+-                    request_deserializer=a2a__pb2.ListTaskPushNotificationConfigRequest.FromString,
+-                    response_serializer=a2a__pb2.ListTaskPushNotificationConfigResponse.SerializeToString,
+-            ),
+-            'GetAgentCard': grpc.unary_unary_rpc_method_handler(
+-                    servicer.GetAgentCard,
+-                    request_deserializer=a2a__pb2.GetAgentCardRequest.FromString,
+-                    response_serializer=a2a__pb2.AgentCard.SerializeToString,
+-            ),
+-            'DeleteTaskPushNotificationConfig': grpc.unary_unary_rpc_method_handler(
+-                    servicer.DeleteTaskPushNotificationConfig,
+-                    request_deserializer=a2a__pb2.DeleteTaskPushNotificationConfigRequest.FromString,
+-                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+-            ),
+-    }
+-    generic_handler = grpc.method_handlers_generic_handler(
+-            'a2a.v1.A2AService', rpc_method_handlers)
+-    server.add_generic_rpc_handlers((generic_handler,))
+-    server.add_registered_method_handlers('a2a.v1.A2AService', rpc_method_handlers)
+-
+-
+- # This class is part of an EXPERIMENTAL API.
+-class A2AService(object):
+-    """A2AService defines the gRPC version of the A2A protocol. This has a slightly
+-    different shape than the JSONRPC version to better conform to AIP-127,
+-    where appropriate. The nouns are AgentCard, Message, Task and
+-    TaskPushNotificationConfig.
+-    - Messages are not a standard resource so there is no get/delete/update/list
+-    interface, only a send and stream custom methods.
+-    - Tasks have a get interface and custom cancel and subscribe methods.
+-    - TaskPushNotificationConfig are a resource whose parent is a task. 
+-    They have get, list and create methods.
+-    - AgentCard is a static resource with only a get method.
+-    fields are not present as they don't comply with AIP rules, and the
+-    optional history_length on the get task method is not present as it also
+-    violates AIP-127 and AIP-131.
+-    """
+-
+-    @staticmethod
+-    def SendMessage(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/SendMessage',
+-            a2a__pb2.SendMessageRequest.SerializeToString,
+-            a2a__pb2.SendMessageResponse.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def SendStreamingMessage(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_stream(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/SendStreamingMessage',
+-            a2a__pb2.SendMessageRequest.SerializeToString,
+-            a2a__pb2.StreamResponse.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def GetTask(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/GetTask',
+-            a2a__pb2.GetTaskRequest.SerializeToString,
+-            a2a__pb2.Task.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def CancelTask(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/CancelTask',
+-            a2a__pb2.CancelTaskRequest.SerializeToString,
+-            a2a__pb2.Task.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def TaskSubscription(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_stream(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/TaskSubscription',
+-            a2a__pb2.TaskSubscriptionRequest.SerializeToString,
+-            a2a__pb2.StreamResponse.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def CreateTaskPushNotificationConfig(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/CreateTaskPushNotificationConfig',
+-            a2a__pb2.CreateTaskPushNotificationConfigRequest.SerializeToString,
+-            a2a__pb2.TaskPushNotificationConfig.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def GetTaskPushNotificationConfig(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/GetTaskPushNotificationConfig',
+-            a2a__pb2.GetTaskPushNotificationConfigRequest.SerializeToString,
+-            a2a__pb2.TaskPushNotificationConfig.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def ListTaskPushNotificationConfig(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/ListTaskPushNotificationConfig',
+-            a2a__pb2.ListTaskPushNotificationConfigRequest.SerializeToString,
+-            a2a__pb2.ListTaskPushNotificationConfigResponse.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def GetAgentCard(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/GetAgentCard',
+-            a2a__pb2.GetAgentCardRequest.SerializeToString,
+-            a2a__pb2.AgentCard.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+-
+-    @staticmethod
+-    def DeleteTaskPushNotificationConfig(request,
+-            target,
+-            options=(),
+-            channel_credentials=None,
+-            call_credentials=None,
+-            insecure=False,
+-            compression=None,
+-            wait_for_ready=None,
+-            timeout=None,
+-            metadata=None):
+-        return grpc.experimental.unary_unary(
+-            request,
+-            target,
+-            '/a2a.v1.A2AService/DeleteTaskPushNotificationConfig',
+-            a2a__pb2.DeleteTaskPushNotificationConfigRequest.SerializeToString,
+-            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+-            options,
+-            channel_credentials,
+-            insecure,
+-            call_credentials,
+-            compression,
+-            wait_for_ready,
+-            timeout,
+-            metadata,
+-            _registered_method=True)
+diff --git a/src/a2a/server/request_handlers/__init__.py b/src/a2a/server/request_handlers/__init__.py
+index 8cf2fe8..2d22996 100644
+--- a/src/a2a/server/request_handlers/__init__.py
++++ b/src/a2a/server/request_handlers/__init__.py
+@@ -3,7 +3,8 @@
+ from a2a.server.request_handlers.default_request_handler import (
+     DefaultRequestHandler,
+ )
+-from a2a.server.request_handlers.grpc_handler import GrpcHandler
++
++# from a2a.server.request_handlers.grpc_handler import GrpcHandler
+ from a2a.server.request_handlers.jsonrpc_handler import JSONRPCHandler
+ from a2a.server.request_handlers.request_handler import RequestHandler
+ from a2a.server.request_handlers.response_helpers import (
+@@ -14,7 +15,7 @@ from a2a.server.request_handlers.response_helpers import (
+ 
+ __all__ = [
+     'DefaultRequestHandler',
+-    'GrpcHandler',
++    # 'GrpcHandler',
+     'JSONRPCHandler',
+     'RequestHandler',
+     'build_error_response',
+diff --git a/src/a2a/server/request_handlers/grpc_handler.py b/src/a2a/server/request_handlers/grpc_handler.py
+deleted file mode 100644
+index 74f7405..0000000
+--- a/src/a2a/server/request_handlers/grpc_handler.py
++++ /dev/null
+@@ -1,367 +0,0 @@
+-# ruff: noqa: N802
+-import contextlib
+-import logging
+-
+-from abc import ABC, abstractmethod
+-from collections.abc import AsyncIterable
+-
+-import grpc
+-
+-import a2a.grpc.a2a_pb2_grpc as a2a_grpc
+-
+-from a2a import types
+-from a2a.auth.user import UnauthenticatedUser
+-from a2a.grpc import a2a_pb2
+-from a2a.server.context import ServerCallContext
+-from a2a.server.request_handlers.request_handler import RequestHandler
+-from a2a.types import (
+-    AgentCard,
+-    TaskNotFoundError,
+-)
+-from a2a.utils import proto_utils
+-from a2a.utils.errors import ServerError
+-from a2a.utils.helpers import validate, validate_async_generator
+-
+-
+-logger = logging.getLogger(__name__)
+-
+-# For now we use a trivial wrapper on the grpc context object
+-
+-
+-class CallContextBuilder(ABC):
+-    """A class for building ServerCallContexts using the Starlette Request."""
+-
+-    @abstractmethod
+-    def build(self, context: grpc.ServicerContext) -> ServerCallContext:
+-        """Builds a ServerCallContext from a gRPC Request."""
+-
+-
+-class DefaultCallContextBuilder(CallContextBuilder):
+-    """A default implementation of CallContextBuilder."""
+-
+-    def build(self, context: grpc.ServicerContext) -> ServerCallContext:
+-        """Builds the ServerCallContext."""
+-        user = UnauthenticatedUser()
+-        state = {}
+-        with contextlib.suppress(Exception):
+-            state['grpc_context'] = context
+-        return ServerCallContext(user=user, state=state)
+-
+-
+-class GrpcHandler(a2a_grpc.A2AServiceServicer):
+-    """Maps incoming gRPC requests to the appropriate request handler method."""
+-
+-    def __init__(
+-        self,
+-        agent_card: AgentCard,
+-        request_handler: RequestHandler,
+-        context_builder: CallContextBuilder | None = None,
+-    ):
+-        """Initializes the GrpcHandler.
+-
+-        Args:
+-            agent_card: The AgentCard describing the agent's capabilities.
+-            request_handler: The underlying `RequestHandler` instance to
+-                             delegate requests to.
+-            context_builder: The CallContextBuilder object. If none the
+-                             DefaultCallContextBuilder is used.
+-        """
+-        self.agent_card = agent_card
+-        self.request_handler = request_handler
+-        self.context_builder = context_builder or DefaultCallContextBuilder()
+-
+-    async def SendMessage(
+-        self,
+-        request: a2a_pb2.SendMessageRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.SendMessageResponse:
+-        """Handles the 'SendMessage' gRPC method.
+-
+-        Args:
+-            request: The incoming `SendMessageRequest` object.
+-            context: Context provided by the server.
+-
+-        Returns:
+-            A `SendMessageResponse` object containing the result (Task or
+-            Message) or throws an error response if a `ServerError` is raised
+-            by the handler.
+-        """
+-        try:
+-            # Construct the server context object
+-            server_context = self.context_builder.build(context)
+-            # Transform the proto object to the python internal objects
+-            a2a_request = proto_utils.FromProto.message_send_params(
+-                request,
+-            )
+-            task_or_message = await self.request_handler.on_message_send(
+-                a2a_request, server_context
+-            )
+-            return proto_utils.ToProto.task_or_message(task_or_message)
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return a2a_pb2.SendMessageResponse()
+-
+-    @validate_async_generator(
+-        lambda self: self.agent_card.capabilities.streaming,
+-        'Streaming is not supported by the agent',
+-    )
+-    async def SendStreamingMessage(
+-        self,
+-        request: a2a_pb2.SendMessageRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> AsyncIterable[a2a_pb2.StreamResponse]:
+-        """Handles the 'StreamMessage' gRPC method.
+-
+-        Yields response objects as they are produced by the underlying handler's
+-        stream.
+-
+-        Args:
+-            request: The incoming `SendMessageRequest` object.
+-            context: Context provided by the server.
+-
+-        Yields:
+-            `StreamResponse` objects containing streaming events
+-            (Task, Message, TaskStatusUpdateEvent, TaskArtifactUpdateEvent)
+-            or gRPC error responses if a `ServerError` is raised.
+-        """
+-        server_context = self.context_builder.build(context)
+-        # Transform the proto object to the python internal objects
+-        a2a_request = proto_utils.FromProto.message_send_params(
+-            request,
+-        )
+-        try:
+-            async for event in self.request_handler.on_message_send_stream(
+-                a2a_request, server_context
+-            ):
+-                yield proto_utils.ToProto.stream_response(event)
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return
+-
+-    async def CancelTask(
+-        self,
+-        request: a2a_pb2.CancelTaskRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.Task:
+-        """Handles the 'CancelTask' gRPC method.
+-
+-        Args:
+-            request: The incoming `CancelTaskRequest` object.
+-            context: Context provided by the server.
+-
+-        Returns:
+-            A `Task` object containing the updated Task or a gRPC error.
+-        """
+-        try:
+-            server_context = self.context_builder.build(context)
+-            task_id_params = proto_utils.FromProto.task_id_params(request)
+-            task = await self.request_handler.on_cancel_task(
+-                task_id_params, server_context
+-            )
+-            if task:
+-                return proto_utils.ToProto.task(task)
+-            await self.abort_context(
+-                ServerError(error=TaskNotFoundError()), context
+-            )
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return a2a_pb2.Task()
+-
+-    @validate_async_generator(
+-        lambda self: self.agent_card.capabilities.streaming,
+-        'Streaming is not supported by the agent',
+-    )
+-    async def TaskSubscription(
+-        self,
+-        request: a2a_pb2.TaskSubscriptionRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> AsyncIterable[a2a_pb2.StreamResponse]:
+-        """Handles the 'TaskSubscription' gRPC method.
+-
+-        Yields response objects as they are produced by the underlying handler's
+-        stream.
+-
+-        Args:
+-            request: The incoming `TaskSubscriptionRequest` object.
+-            context: Context provided by the server.
+-
+-        Yields:
+-            `StreamResponse` objects containing streaming events
+-        """
+-        try:
+-            server_context = self.context_builder.build(context)
+-            async for event in self.request_handler.on_resubscribe_to_task(
+-                proto_utils.FromProto.task_id_params(request),
+-                server_context,
+-            ):
+-                yield proto_utils.ToProto.stream_response(event)
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-
+-    async def GetTaskPushNotificationConfig(
+-        self,
+-        request: a2a_pb2.GetTaskPushNotificationConfigRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.TaskPushNotificationConfig:
+-        """Handles the 'GetTaskPushNotificationConfig' gRPC method.
+-
+-        Args:
+-            request: The incoming `GetTaskPushNotificationConfigRequest` object.
+-            context: Context provided by the server.
+-
+-        Returns:
+-            A `TaskPushNotificationConfig` object containing the config.
+-        """
+-        try:
+-            server_context = self.context_builder.build(context)
+-            config = (
+-                await self.request_handler.on_get_task_push_notification_config(
+-                    proto_utils.FromProto.task_id_params(request),
+-                    server_context,
+-                )
+-            )
+-            return proto_utils.ToProto.task_push_notification_config(config)
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return a2a_pb2.TaskPushNotificationConfig()
+-
+-    @validate(
+-        lambda self: self.agent_card.capabilities.pushNotifications,
+-        'Push notifications are not supported by the agent',
+-    )
+-    async def CreateTaskPushNotificationConfig(
+-        self,
+-        request: a2a_pb2.CreateTaskPushNotificationConfigRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.TaskPushNotificationConfig:
+-        """Handles the 'CreateTaskPushNotificationConfig' gRPC method.
+-
+-        Requires the agent to support push notifications.
+-
+-        Args:
+-            request: The incoming `CreateTaskPushNotificationConfigRequest` object.
+-            context: Context provided by the server.
+-
+-        Returns:
+-            A `TaskPushNotificationConfig` object
+-
+-        Raises:
+-            ServerError: If push notifications are not supported by the agent
+-                (due to the `@validate` decorator).
+-        """
+-        try:
+-            server_context = self.context_builder.build(context)
+-            config = (
+-                await self.request_handler.on_set_task_push_notification_config(
+-                    proto_utils.FromProto.task_push_notification_config(
+-                        request,
+-                    ),
+-                    server_context,
+-                )
+-            )
+-            return proto_utils.ToProto.task_push_notification_config(config)
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return a2a_pb2.TaskPushNotificationConfig()
+-
+-    async def GetTask(
+-        self,
+-        request: a2a_pb2.GetTaskRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.Task:
+-        """Handles the 'GetTask' gRPC method.
+-
+-        Args:
+-            request: The incoming `GetTaskRequest` object.
+-            context: Context provided by the server.
+-
+-        Returns:
+-            A `Task` object.
+-        """
+-        try:
+-            server_context = self.context_builder.build(context)
+-            task = await self.request_handler.on_get_task(
+-                proto_utils.FromProto.task_query_params(request), server_context
+-            )
+-            if task:
+-                return proto_utils.ToProto.task(task)
+-            await self.abort_context(
+-                ServerError(error=TaskNotFoundError()), context
+-            )
+-        except ServerError as e:
+-            await self.abort_context(e, context)
+-        return a2a_pb2.Task()
+-
+-    async def GetAgentCard(
+-        self,
+-        request: a2a_pb2.GetAgentCardRequest,
+-        context: grpc.aio.ServicerContext,
+-    ) -> a2a_pb2.AgentCard:
+-        """Get the agent card for the agent served."""
+-        return proto_utils.ToProto.agent_card(self.agent_card)
+-
+-    async def abort_context(
+-        self, error: ServerError, context: grpc.ServicerContext
+-    ) -> None:
+-        """Sets the grpc errors appropriately in the context."""
+-        match error.error:
+-            case types.JSONParseError():
+-                await context.abort(
+-                    grpc.StatusCode.INTERNAL,
+-                    f'JSONParseError: {error.error.message}',
+-                )
+-            case types.InvalidRequestError():
+-                await context.abort(
+-                    grpc.StatusCode.INVALID_ARGUMENT,
+-                    f'InvalidRequestError: {error.error.message}',
+-                )
+-            case types.MethodNotFoundError():
+-                await context.abort(
+-                    grpc.StatusCode.NOT_FOUND,
+-                    f'MethodNotFoundError: {error.error.message}',
+-                )
+-            case types.InvalidParamsError():
+-                await context.abort(
+-                    grpc.StatusCode.INVALID_ARGUMENT,
+-                    f'InvalidParamsError: {error.error.message}',
+-                )
+-            case types.InternalError():
+-                await context.abort(
+-                    grpc.StatusCode.INTERNAL,
+-                    f'InternalError: {error.error.message}',
+-                )
+-            case types.TaskNotFoundError():
+-                await context.abort(
+-                    grpc.StatusCode.NOT_FOUND,
+-                    f'TaskNotFoundError: {error.error.message}',
+-                )
+-            case types.TaskNotCancelableError():
+-                await context.abort(
+-                    grpc.StatusCode.UNIMPLEMENTED,
+-                    f'TaskNotCancelableError: {error.error.message}',
+-                )
+-            case types.PushNotificationNotSupportedError():
+-                await context.abort(
+-                    grpc.StatusCode.UNIMPLEMENTED,
+-                    f'PushNotificationNotSupportedError: {error.error.message}',
+-                )
+-            case types.UnsupportedOperationError():
+-                await context.abort(
+-                    grpc.StatusCode.UNIMPLEMENTED,
+-                    f'UnsupportedOperationError: {error.error.message}',
+-                )
+-            case types.ContentTypeNotSupportedError():
+-                await context.abort(
+-                    grpc.StatusCode.UNIMPLEMENTED,
+-                    f'ContentTypeNotSupportedError: {error.error.message}',
+-                )
+-            case types.InvalidAgentResponseError():
+-                await context.abort(
+-                    grpc.StatusCode.INTERNAL,
+-                    f'InvalidAgentResponseError: {error.error.message}',
+-                )
+-            case _:
+-                await context.abort(
+-                    grpc.StatusCode.UNKNOWN,
+-                    f'Unknown error type: {error.error}',
+-                )
+diff --git a/src/a2a/utils/proto_utils.py b/src/a2a/utils/proto_utils.py
+index dffd2e5..2663fb2 100644
+--- a/src/a2a/utils/proto_utils.py
++++ b/src/a2a/utils/proto_utils.py
+@@ -9,7 +9,8 @@ from typing import Any
+ from google.protobuf import json_format, struct_pb2
+ 
+ from a2a import types
+-from a2a.grpc import a2a_pb2
++
++# from a2a.grpc import a2a_pb2
+ from a2a.utils.errors import ServerError
+ 
+ 
+diff --git a/tests/server/request_handlers/test_grpc_handler.py b/tests/server/request_handlers/test_grpc_handler.py
+deleted file mode 100644
+index 016e05b..0000000
+--- a/tests/server/request_handlers/test_grpc_handler.py
++++ /dev/null
+@@ -1,197 +0,0 @@
+-from unittest.mock import AsyncMock
+-
+-import grpc
+-import pytest
+-
+-from a2a import types
+-from a2a.grpc import a2a_pb2
+-from a2a.server.request_handlers import GrpcHandler, RequestHandler
+-from a2a.utils.errors import ServerError
+-
+-
+-# --- Fixtures ---
+-
+-
+-@pytest.fixture
+-def mock_request_handler() -> AsyncMock:
+-    return AsyncMock(spec=RequestHandler)
+-
+-
+-@pytest.fixture
+-def mock_grpc_context() -> AsyncMock:
+-    context = AsyncMock(spec=grpc.aio.ServicerContext)
+-    context.abort = AsyncMock()
+-    return context
+-
+-
+-@pytest.fixture
+-def sample_agent_card() -> types.AgentCard:
+-    return types.AgentCard(
+-        name='Test Agent',
+-        description='A test agent',
+-        url='http://localhost',
+-        version='1.0.0',
+-        capabilities=types.AgentCapabilities(
+-            streaming=True, pushNotifications=True
+-        ),
+-        defaultInputModes=['text/plain'],
+-        defaultOutputModes=['text/plain'],
+-        skills=[],
+-    )
+-
+-
+-@pytest.fixture
+-def grpc_handler(
+-    mock_request_handler: AsyncMock, sample_agent_card: types.AgentCard
+-) -> GrpcHandler:
+-    return GrpcHandler(
+-        agent_card=sample_agent_card, request_handler=mock_request_handler
+-    )
+-
+-
+-# --- Test Cases ---
+-
+-
+-@pytest.mark.asyncio
+-async def test_send_message_success(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test successful SendMessage call."""
+-    request_proto = a2a_pb2.SendMessageRequest(
+-        request=a2a_pb2.Message(message_id='msg-1')
+-    )
+-    response_model = types.Task(
+-        id='task-1',
+-        contextId='ctx-1',
+-        status=types.TaskStatus(state=types.TaskState.completed),
+-    )
+-    mock_request_handler.on_message_send.return_value = response_model
+-
+-    response = await grpc_handler.SendMessage(request_proto, mock_grpc_context)
+-
+-    mock_request_handler.on_message_send.assert_awaited_once()
+-    assert isinstance(response, a2a_pb2.SendMessageResponse)
+-    assert response.HasField('task')
+-    assert response.task.id == 'task-1'
+-
+-
+-@pytest.mark.asyncio
+-async def test_send_message_server_error(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test SendMessage call when handler raises a ServerError."""
+-    request_proto = a2a_pb2.SendMessageRequest()
+-    error = ServerError(error=types.InvalidParamsError(message='Bad params'))
+-    mock_request_handler.on_message_send.side_effect = error
+-
+-    await grpc_handler.SendMessage(request_proto, mock_grpc_context)
+-
+-    mock_grpc_context.abort.assert_awaited_once_with(
+-        grpc.StatusCode.INVALID_ARGUMENT, 'InvalidParamsError: Bad params'
+-    )
+-
+-
+-@pytest.mark.asyncio
+-async def test_get_task_success(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test successful GetTask call."""
+-    request_proto = a2a_pb2.GetTaskRequest(name='tasks/task-1')
+-    response_model = types.Task(
+-        id='task-1',
+-        contextId='ctx-1',
+-        status=types.TaskStatus(state=types.TaskState.working),
+-    )
+-    mock_request_handler.on_get_task.return_value = response_model
+-
+-    response = await grpc_handler.GetTask(request_proto, mock_grpc_context)
+-
+-    mock_request_handler.on_get_task.assert_awaited_once()
+-    assert isinstance(response, a2a_pb2.Task)
+-    assert response.id == 'task-1'
+-
+-
+-@pytest.mark.asyncio
+-async def test_get_task_not_found(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test GetTask call when task is not found."""
+-    request_proto = a2a_pb2.GetTaskRequest(name='tasks/task-1')
+-    mock_request_handler.on_get_task.return_value = None
+-
+-    await grpc_handler.GetTask(request_proto, mock_grpc_context)
+-
+-    mock_grpc_context.abort.assert_awaited_once_with(
+-        grpc.StatusCode.NOT_FOUND, 'TaskNotFoundError: Task not found'
+-    )
+-
+-
+-@pytest.mark.asyncio
+-async def test_cancel_task_server_error(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test CancelTask call when handler raises ServerError."""
+-    request_proto = a2a_pb2.CancelTaskRequest(name='tasks/task-1')
+-    error = ServerError(error=types.TaskNotCancelableError())
+-    mock_request_handler.on_cancel_task.side_effect = error
+-
+-    await grpc_handler.CancelTask(request_proto, mock_grpc_context)
+-
+-    mock_grpc_context.abort.assert_awaited_once_with(
+-        grpc.StatusCode.UNIMPLEMENTED,
+-        'TaskNotCancelableError: Task cannot be canceled',
+-    )
+-
+-
+-@pytest.mark.asyncio
+-async def test_send_streaming_message(
+-    grpc_handler: GrpcHandler,
+-    mock_request_handler: AsyncMock,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test successful SendStreamingMessage call."""
+-
+-    async def mock_stream():
+-        yield types.Task(
+-            id='task-1',
+-            contextId='ctx-1',
+-            status=types.TaskStatus(state=types.TaskState.working),
+-        )
+-
+-    mock_request_handler.on_message_send_stream.return_value = mock_stream()
+-    request_proto = a2a_pb2.SendMessageRequest()
+-
+-    results = [
+-        result
+-        async for result in grpc_handler.SendStreamingMessage(
+-            request_proto, mock_grpc_context
+-        )
+-    ]
+-
+-    assert len(results) == 1
+-    assert results[0].HasField('task')
+-    assert results[0].task.id == 'task-1'
+-
+-
+-@pytest.mark.asyncio
+-async def test_get_agent_card(
+-    grpc_handler: GrpcHandler,
+-    sample_agent_card: types.AgentCard,
+-    mock_grpc_context: AsyncMock,
+-):
+-    """Test GetAgentCard call."""
+-    request_proto = a2a_pb2.GetAgentCardRequest()
+-    response = await grpc_handler.GetAgentCard(request_proto, mock_grpc_context)
+-
+-    assert response.name == sample_agent_card.name
+-    assert response.version == sample_agent_card.version
+diff --git a/tests/utils/test_proto_utils.py b/tests/utils/test_proto_utils.py
+index b8db386..8e8ae69 100644
+--- a/tests/utils/test_proto_utils.py
++++ b/tests/utils/test_proto_utils.py
+@@ -1,7 +1,8 @@
+ import pytest
+ 
+ from a2a import types
+-from a2a.grpc import a2a_pb2
++
++# from a2a.grpc import a2a_pb2
+ from a2a.utils import proto_utils
+ 
+ 
