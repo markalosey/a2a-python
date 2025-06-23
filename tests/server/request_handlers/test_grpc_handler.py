@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock
 
-import grpc
+# import grpc
 import pytest
 
 from a2a import types

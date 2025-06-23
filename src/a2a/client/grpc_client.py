@@ -2,7 +2,7 @@ import logging
 
 from collections.abc import AsyncGenerator
 
-import grpc
+# import grpc
 
 from a2a.grpc import a2a_pb2, a2a_pb2_grpc
 from a2a.types import (

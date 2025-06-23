@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable
 
-import grpc
+# import grpc
 
 import a2a.grpc.a2a_pb2_grpc as a2a_grpc
 
