@@ -34,7 +34,7 @@ DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ta2a.proto\x12\x0
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'a2a_pb2', _globals)
+# _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'a2a_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n\ncom.a2a.v1B\010A2aProtoP\001Z\030google.golang.org/a2a/v1\242\002\003AXX\252\002\006A2a.V1\312\002\006A2a\\V1\342\002\022A2a\\V1\\GPBMetadata\352\002\007A2a::V1'

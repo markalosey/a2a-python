@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 
 # import grpc
 
-from a2a.grpc import a2a_pb2, a2a_pb2_grpc
+# from a2a.grpc import a2a_pb2, a2a_pb2_grpc
 from a2a.types import (
     AgentCard,
     Message,
@@ -24,15 +24,15 @@ logger = logging.getLogger(__name__)
 
 
 @trace_class(kind=SpanKind.CLIENT)
-class A2AGrpcClient:
+# class A2AGrpcClient:
     """A2A Client for interacting with an A2A agent via gRPC."""
 
     def __init__(
         self,
-        grpc_stub: a2a_pb2_grpc.A2AServiceStub,
+#         grpc_stub: a2a_pb2_grpc.A2AServiceStub,
         agent_card: AgentCard,
     ):
-        """Initializes the A2AGrpcClient.
+#         """Initializes the A2AGrpcClient.
 
         Requires an `AgentCard`
 
@@ -56,7 +56,7 @@ class A2AGrpcClient:
             A `Task` or `Message` object containing the agent's response.
         """
         response = await self.stub.SendMessage(
-            a2a_pb2.SendMessageRequest(
+#             a2a_pb2.SendMessageRequest(
                 request=proto_utils.ToProto.message(request.message),
                 configuration=proto_utils.ToProto.message_send_configuration(
                     request.configuration
@@ -88,7 +88,7 @@ class A2AGrpcClient:
             stream.
         """
         stream = self.stub.SendStreamingMessage(
-            a2a_pb2.SendMessageRequest(
+#             a2a_pb2.SendMessageRequest(
                 request=proto_utils.ToProto.message(request.message),
                 configuration=proto_utils.ToProto.message_send_configuration(
                     request.configuration
@@ -126,7 +126,7 @@ class A2AGrpcClient:
             A `Task` object containing the Task or None.
         """
         task = await self.stub.GetTask(
-            a2a_pb2.GetTaskRequest(name=f'tasks/{request.id}')
+#             a2a_pb2.GetTaskRequest(name=f'tasks/{request.id}')
         )
         return proto_utils.FromProto.task(task)
 
@@ -143,7 +143,7 @@ class A2AGrpcClient:
             A `Task` object containing the updated Task
         """
         task = await self.stub.CancelTask(
-            a2a_pb2.CancelTaskRequest(name=f'tasks/{request.id}')
+#             a2a_pb2.CancelTaskRequest(name=f'tasks/{request.id}')
         )
         return proto_utils.FromProto.task(task)
 
@@ -160,7 +160,7 @@ class A2AGrpcClient:
             A `TaskPushNotificationConfig` object containing the config.
         """
         config = await self.stub.CreateTaskPushNotificationConfig(
-            a2a_pb2.CreateTaskPushNotificationConfigRequest(
+#             a2a_pb2.CreateTaskPushNotificationConfigRequest(
                 parent='',
                 config_id='',
                 config=proto_utils.ToProto.task_push_notification_config(
@@ -183,7 +183,7 @@ class A2AGrpcClient:
             A `TaskPushNotificationConfig` object containing the configuration.
         """
         config = await self.stub.GetTaskPushNotificationConfig(
-            a2a_pb2.GetTaskPushNotificationConfigRequest(
+#             a2a_pb2.GetTaskPushNotificationConfigRequest(
                 name=f'tasks/{request.id}/pushNotification/undefined',
             )
         )

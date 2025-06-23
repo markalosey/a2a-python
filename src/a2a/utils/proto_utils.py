@@ -9,7 +9,7 @@ from typing import Any
 from google.protobuf import json_format, struct_pb2
 
 from a2a import types
-from a2a.grpc import a2a_pb2
+# from a2a.grpc import a2a_pb2
 from a2a.utils.errors import ServerError
 
 
@@ -22,10 +22,10 @@ class ToProto:
     """Converts Python types to proto types."""
 
     @classmethod
-    def message(cls, message: types.Message | None) -> a2a_pb2.Message | None:
+#     def message(cls, message: types.Message | None) -> a2a_pb2.Message | None:
         if message is None:
             return None
-        return a2a_pb2.Message(
+#         return a2a_pb2.Message(
             message_id=message.messageId,
             content=[ToProto.part(p) for p in message.parts],
             context_id=message.contextId,
@@ -50,19 +50,19 @@ class ToProto:
         )
 
     @classmethod
-    def part(cls, part: types.Part) -> a2a_pb2.Part:
+#     def part(cls, part: types.Part) -> a2a_pb2.Part:
         if isinstance(part.root, types.TextPart):
-            return a2a_pb2.Part(text=part.root.text)
+#             return a2a_pb2.Part(text=part.root.text)
         if isinstance(part.root, types.FilePart):
-            return a2a_pb2.Part(file=ToProto.file(part.root.file))
+#             return a2a_pb2.Part(file=ToProto.file(part.root.file))
         if isinstance(part.root, types.DataPart):
-            return a2a_pb2.Part(data=ToProto.data(part.root.data))
+#             return a2a_pb2.Part(data=ToProto.data(part.root.data))
         raise ValueError(f'Unsupported part type: {part.root}')
 
     @classmethod
-    def data(cls, data: dict[str, Any]) -> a2a_pb2.DataPart:
+#     def data(cls, data: dict[str, Any]) -> a2a_pb2.DataPart:
         json_data = json.dumps(data)
-        return a2a_pb2.DataPart(
+#         return a2a_pb2.DataPart(
             data=json_format.Parse(
                 json_data,
                 struct_pb2.Struct(),
@@ -72,14 +72,14 @@ class ToProto:
     @classmethod
     def file(
         cls, file: types.FileWithUri | types.FileWithBytes
-    ) -> a2a_pb2.FilePart:
+#     ) -> a2a_pb2.FilePart:
         if isinstance(file, types.FileWithUri):
-            return a2a_pb2.FilePart(file_with_uri=file.uri)
-        return a2a_pb2.FilePart(file_with_bytes=file.bytes.encode('utf-8'))
+#             return a2a_pb2.FilePart(file_with_uri=file.uri)
+#         return a2a_pb2.FilePart(file_with_bytes=file.bytes.encode('utf-8'))
 
     @classmethod
-    def task(cls, task: types.Task) -> a2a_pb2.Task:
-        return a2a_pb2.Task(
+#     def task(cls, task: types.Task) -> a2a_pb2.Task:
+#         return a2a_pb2.Task(
             id=task.id,
             context_id=task.contextId,
             status=ToProto.task_status(task.status),
@@ -96,33 +96,33 @@ class ToProto:
         )
 
     @classmethod
-    def task_status(cls, status: types.TaskStatus) -> a2a_pb2.TaskStatus:
-        return a2a_pb2.TaskStatus(
+#     def task_status(cls, status: types.TaskStatus) -> a2a_pb2.TaskStatus:
+#         return a2a_pb2.TaskStatus(
             state=ToProto.task_state(status.state),
             update=ToProto.message(status.message),
         )
 
     @classmethod
-    def task_state(cls, state: types.TaskState) -> a2a_pb2.TaskState:
+#     def task_state(cls, state: types.TaskState) -> a2a_pb2.TaskState:
         match state:
             case types.TaskState.submitted:
-                return a2a_pb2.TaskState.TASK_STATE_SUBMITTED
+#                 return a2a_pb2.TaskState.TASK_STATE_SUBMITTED
             case types.TaskState.working:
-                return a2a_pb2.TaskState.TASK_STATE_WORKING
+#                 return a2a_pb2.TaskState.TASK_STATE_WORKING
             case types.TaskState.completed:
-                return a2a_pb2.TaskState.TASK_STATE_COMPLETED
+#                 return a2a_pb2.TaskState.TASK_STATE_COMPLETED
             case types.TaskState.canceled:
-                return a2a_pb2.TaskState.TASK_STATE_CANCELLED
+#                 return a2a_pb2.TaskState.TASK_STATE_CANCELLED
             case types.TaskState.failed:
-                return a2a_pb2.TaskState.TASK_STATE_FAILED
+#                 return a2a_pb2.TaskState.TASK_STATE_FAILED
             case types.TaskState.input_required:
-                return a2a_pb2.TaskState.TASK_STATE_INPUT_REQUIRED
+#                 return a2a_pb2.TaskState.TASK_STATE_INPUT_REQUIRED
             case _:
-                return a2a_pb2.TaskState.TASK_STATE_UNSPECIFIED
+#                 return a2a_pb2.TaskState.TASK_STATE_UNSPECIFIED
 
     @classmethod
-    def artifact(cls, artifact: types.Artifact) -> a2a_pb2.Artifact:
-        return a2a_pb2.Artifact(
+#     def artifact(cls, artifact: types.Artifact) -> a2a_pb2.Artifact:
+#         return a2a_pb2.Artifact(
             artifact_id=artifact.artifactId,
             description=artifact.description,
             metadata=ToProto.metadata(artifact.metadata),
@@ -133,8 +133,8 @@ class ToProto:
     @classmethod
     def authentication_info(
         cls, info: types.PushNotificationAuthenticationInfo
-    ) -> a2a_pb2.AuthenticationInfo:
-        return a2a_pb2.AuthenticationInfo(
+#     ) -> a2a_pb2.AuthenticationInfo:
+#         return a2a_pb2.AuthenticationInfo(
             schemes=info.schemes,
             credentials=info.credentials,
         )
@@ -142,8 +142,8 @@ class ToProto:
     @classmethod
     def push_notification_config(
         cls, config: types.PushNotificationConfig
-    ) -> a2a_pb2.PushNotificationConfig:
-        return a2a_pb2.PushNotificationConfig(
+#     ) -> a2a_pb2.PushNotificationConfig:
+#         return a2a_pb2.PushNotificationConfig(
             id=config.id or '',
             url=config.url,
             token=config.token,
@@ -153,8 +153,8 @@ class ToProto:
     @classmethod
     def task_artifact_update_event(
         cls, event: types.TaskArtifactUpdateEvent
-    ) -> a2a_pb2.TaskArtifactUpdateEvent:
-        return a2a_pb2.TaskArtifactUpdateEvent(
+#     ) -> a2a_pb2.TaskArtifactUpdateEvent:
+#         return a2a_pb2.TaskArtifactUpdateEvent(
             task_id=event.taskId,
             context_id=event.contextId,
             artifact=ToProto.artifact(event.artifact),
@@ -166,8 +166,8 @@ class ToProto:
     @classmethod
     def task_status_update_event(
         cls, event: types.TaskStatusUpdateEvent
-    ) -> a2a_pb2.TaskStatusUpdateEvent:
-        return a2a_pb2.TaskStatusUpdateEvent(
+#     ) -> a2a_pb2.TaskStatusUpdateEvent:
+#         return a2a_pb2.TaskStatusUpdateEvent(
             task_id=event.taskId,
             context_id=event.contextId,
             status=ToProto.task_status(event.status),
@@ -178,10 +178,10 @@ class ToProto:
     @classmethod
     def message_send_configuration(
         cls, config: types.MessageSendConfiguration | None
-    ) -> a2a_pb2.SendMessageConfiguration:
+#     ) -> a2a_pb2.SendMessageConfiguration:
         if not config:
-            return a2a_pb2.SendMessageConfiguration()
-        return a2a_pb2.SendMessageConfiguration(
+#             return a2a_pb2.SendMessageConfiguration()
+#         return a2a_pb2.SendMessageConfiguration(
             accepted_output_modes=list(config.acceptedOutputModes),
             push_notification=ToProto.push_notification_config(
                 config.pushNotificationConfig
@@ -197,31 +197,31 @@ class ToProto:
         | types.Message
         | types.TaskStatusUpdateEvent
         | types.TaskArtifactUpdateEvent,
-    ) -> a2a_pb2.StreamResponse:
+#     ) -> a2a_pb2.StreamResponse:
         """Converts a task, message, or task update event to a StreamResponse."""
         if isinstance(event, types.TaskStatusUpdateEvent):
-            return a2a_pb2.StreamResponse(
+#             return a2a_pb2.StreamResponse(
                 status_update=ToProto.task_status_update_event(event)
             )
         if isinstance(event, types.TaskArtifactUpdateEvent):
-            return a2a_pb2.StreamResponse(
+#             return a2a_pb2.StreamResponse(
                 artifact_update=ToProto.task_artifact_update_event(event)
             )
         if isinstance(event, types.Message):
-            return a2a_pb2.StreamResponse(msg=ToProto.message(event))
+#             return a2a_pb2.StreamResponse(msg=ToProto.message(event))
         if isinstance(event, types.Task):
-            return a2a_pb2.StreamResponse(task=ToProto.task(event))
+#             return a2a_pb2.StreamResponse(task=ToProto.task(event))
         raise ValueError(f'Unsupported event type: {type(event)}')
 
     @classmethod
     def task_or_message(
         cls, event: types.Task | types.Message
-    ) -> a2a_pb2.SendMessageResponse:
+#     ) -> a2a_pb2.SendMessageResponse:
         if isinstance(event, types.Message):
-            return a2a_pb2.SendMessageResponse(
+#             return a2a_pb2.SendMessageResponse(
                 msg=cls.message(event),
             )
-        return a2a_pb2.SendMessageResponse(
+#         return a2a_pb2.SendMessageResponse(
             task=cls.task(event),
         )
 
@@ -234,24 +234,24 @@ class ToProto:
             | types.TaskStatusUpdateEvent
             | types.TaskArtifactUpdateEvent
         ),
-    ) -> a2a_pb2.StreamResponse:
+#     ) -> a2a_pb2.StreamResponse:
         if isinstance(event, types.Message):
-            return a2a_pb2.StreamResponse(msg=cls.message(event))
+#             return a2a_pb2.StreamResponse(msg=cls.message(event))
         if isinstance(event, types.Task):
-            return a2a_pb2.StreamResponse(task=cls.task(event))
+#             return a2a_pb2.StreamResponse(task=cls.task(event))
         if isinstance(event, types.TaskStatusUpdateEvent):
-            return a2a_pb2.StreamResponse(
+#             return a2a_pb2.StreamResponse(
                 status_update=cls.task_status_update_event(event),
             )
-        return a2a_pb2.StreamResponse(
+#         return a2a_pb2.StreamResponse(
             artifact_update=cls.task_artifact_update_event(event),
         )
 
     @classmethod
     def task_push_notification_config(
         cls, config: types.TaskPushNotificationConfig
-    ) -> a2a_pb2.TaskPushNotificationConfig:
-        return a2a_pb2.TaskPushNotificationConfig(
+#     ) -> a2a_pb2.TaskPushNotificationConfig:
+#         return a2a_pb2.TaskPushNotificationConfig(
             name=f'tasks/{config.taskId}/pushNotificationConfigs/{config.taskId}',
             push_notification_config=cls.push_notification_config(
                 config.pushNotificationConfig,
@@ -262,8 +262,8 @@ class ToProto:
     def agent_card(
         cls,
         card: types.AgentCard,
-    ) -> a2a_pb2.AgentCard:
-        return a2a_pb2.AgentCard(
+#     ) -> a2a_pb2.AgentCard:
+#         return a2a_pb2.AgentCard(
             capabilities=cls.capabilities(card.capabilities),
             default_input_modes=list(card.defaultInputModes),
             default_output_modes=list(card.defaultOutputModes),
@@ -282,8 +282,8 @@ class ToProto:
     @classmethod
     def capabilities(
         cls, capabilities: types.AgentCapabilities
-    ) -> a2a_pb2.AgentCapabilities:
-        return a2a_pb2.AgentCapabilities(
+#     ) -> a2a_pb2.AgentCapabilities:
+#         return a2a_pb2.AgentCapabilities(
             streaming=capabilities.streaming,
             push_notifications=capabilities.pushNotifications,
         )
@@ -291,10 +291,10 @@ class ToProto:
     @classmethod
     def provider(
         cls, provider: types.AgentProvider | None
-    ) -> a2a_pb2.AgentProvider | None:
+#     ) -> a2a_pb2.AgentProvider | None:
         if not provider:
             return None
-        return a2a_pb2.AgentProvider(
+#         return a2a_pb2.AgentProvider(
             organization=provider.organization,
             url=provider.url,
         )
@@ -303,15 +303,15 @@ class ToProto:
     def security(
         cls,
         security: list[dict[str, list[str]]] | None,
-    ) -> list[a2a_pb2.Security] | None:
+#     ) -> list[a2a_pb2.Security] | None:
         if not security:
             return None
-        rval: list[a2a_pb2.Security] = []
+#         rval: list[a2a_pb2.Security] = []
         for s in security:
             rval.append(
-                a2a_pb2.Security(
+#                 a2a_pb2.Security(
                     schemes={
-                        k: a2a_pb2.StringList(list=v) for (k, v) in s.items()
+#                         k: a2a_pb2.StringList(list=v) for (k, v) in s.items()
                     }
                 )
             )
@@ -321,7 +321,7 @@ class ToProto:
     def security_schemes(
         cls,
         schemes: dict[str, types.SecurityScheme] | None,
-    ) -> dict[str, a2a_pb2.SecurityScheme] | None:
+#     ) -> dict[str, a2a_pb2.SecurityScheme] | None:
         if not schemes:
             return None
         return {k: cls.security_scheme(v) for (k, v) in schemes.items()}
@@ -330,42 +330,42 @@ class ToProto:
     def security_scheme(
         cls,
         scheme: types.SecurityScheme,
-    ) -> a2a_pb2.SecurityScheme:
+#     ) -> a2a_pb2.SecurityScheme:
         if isinstance(scheme.root, types.APIKeySecurityScheme):
-            return a2a_pb2.SecurityScheme(
-                api_key_security_scheme=a2a_pb2.APIKeySecurityScheme(
+#             return a2a_pb2.SecurityScheme(
+#                 api_key_security_scheme=a2a_pb2.APIKeySecurityScheme(
                     description=scheme.root.description,
                     location=scheme.root.in_,
                     name=scheme.root.name,
                 )
             )
         if isinstance(scheme.root, types.HTTPAuthSecurityScheme):
-            return a2a_pb2.SecurityScheme(
-                http_auth_security_scheme=a2a_pb2.HTTPAuthSecurityScheme(
+#             return a2a_pb2.SecurityScheme(
+#                 http_auth_security_scheme=a2a_pb2.HTTPAuthSecurityScheme(
                     description=scheme.root.description,
                     scheme=scheme.root.scheme,
                     bearer_format=scheme.root.bearerFormat,
                 )
             )
         if isinstance(scheme.root, types.OAuth2SecurityScheme):
-            return a2a_pb2.SecurityScheme(
-                oauth2_security_scheme=a2a_pb2.OAuth2SecurityScheme(
+#             return a2a_pb2.SecurityScheme(
+#                 oauth2_security_scheme=a2a_pb2.OAuth2SecurityScheme(
                     description=scheme.root.description,
                     flows=cls.oauth2_flows(scheme.root.flows),
                 )
             )
-        return a2a_pb2.SecurityScheme(
-            open_id_connect_security_scheme=a2a_pb2.OpenIdConnectSecurityScheme(
+#         return a2a_pb2.SecurityScheme(
+#             open_id_connect_security_scheme=a2a_pb2.OpenIdConnectSecurityScheme(
                 description=scheme.root.description,
                 open_id_connect_url=scheme.root.openIdConnectUrl,
             )
         )
 
     @classmethod
-    def oauth2_flows(cls, flows: types.OAuthFlows) -> a2a_pb2.OAuthFlows:
+#     def oauth2_flows(cls, flows: types.OAuthFlows) -> a2a_pb2.OAuthFlows:
         if flows.authorizationCode:
-            return a2a_pb2.OAuthFlows(
-                authorization_code=a2a_pb2.AuthorizationCodeOAuthFlow(
+#             return a2a_pb2.OAuthFlows(
+#                 authorization_code=a2a_pb2.AuthorizationCodeOAuthFlow(
                     authorization_url=flows.authorizationCode.authorizationUrl,
                     refresh_url=flows.authorizationCode.refreshUrl,
                     scopes=dict(flows.authorizationCode.scopes.items()),
@@ -373,24 +373,24 @@ class ToProto:
                 ),
             )
         if flows.clientCredentials:
-            return a2a_pb2.OAuthFlows(
-                client_credentials=a2a_pb2.ClientCredentialsOAuthFlow(
+#             return a2a_pb2.OAuthFlows(
+#                 client_credentials=a2a_pb2.ClientCredentialsOAuthFlow(
                     refresh_url=flows.clientCredentials.refreshUrl,
                     scopes=dict(flows.clientCredentials.scopes.items()),
                     token_url=flows.clientCredentials.tokenUrl,
                 ),
             )
         if flows.implicit:
-            return a2a_pb2.OAuthFlows(
-                implicit=a2a_pb2.ImplicitOAuthFlow(
+#             return a2a_pb2.OAuthFlows(
+#                 implicit=a2a_pb2.ImplicitOAuthFlow(
                     authorization_url=flows.implicit.authorizationUrl,
                     refresh_url=flows.implicit.refreshUrl,
                     scopes=dict(flows.implicit.scopes.items()),
                 ),
             )
         if flows.password:
-            return a2a_pb2.OAuthFlows(
-                password=a2a_pb2.PasswordOAuthFlow(
+#             return a2a_pb2.OAuthFlows(
+#                 password=a2a_pb2.PasswordOAuthFlow(
                     refresh_url=flows.password.refreshUrl,
                     scopes=dict(flows.password.scopes.items()),
                     token_url=flows.password.tokenUrl,
@@ -399,8 +399,8 @@ class ToProto:
         raise ValueError('Unknown oauth flow definition')
 
     @classmethod
-    def skill(cls, skill: types.AgentSkill) -> a2a_pb2.AgentSkill:
-        return a2a_pb2.AgentSkill(
+#     def skill(cls, skill: types.AgentSkill) -> a2a_pb2.AgentSkill:
+#         return a2a_pb2.AgentSkill(
             id=skill.id,
             name=skill.name,
             description=skill.description,
@@ -411,21 +411,21 @@ class ToProto:
         )
 
     @classmethod
-    def role(cls, role: types.Role) -> a2a_pb2.Role:
+#     def role(cls, role: types.Role) -> a2a_pb2.Role:
         match role:
             case types.Role.user:
-                return a2a_pb2.Role.ROLE_USER
+#                 return a2a_pb2.Role.ROLE_USER
             case types.Role.agent:
-                return a2a_pb2.Role.ROLE_AGENT
+#                 return a2a_pb2.Role.ROLE_AGENT
             case _:
-                return a2a_pb2.Role.ROLE_UNSPECIFIED
+#                 return a2a_pb2.Role.ROLE_UNSPECIFIED
 
 
 class FromProto:
     """Converts proto types to Python types."""
 
     @classmethod
-    def message(cls, message: a2a_pb2.Message) -> types.Message:
+#     def message(cls, message: a2a_pb2.Message) -> types.Message:
         return types.Message(
             messageId=message.message_id,
             parts=[FromProto.part(p) for p in message.content],
@@ -444,7 +444,7 @@ class FromProto:
         }
 
     @classmethod
-    def part(cls, part: a2a_pb2.Part) -> types.Part:
+#     def part(cls, part: a2a_pb2.Part) -> types.Part:
         if part.HasField('text'):
             return types.Part(root=types.TextPart(text=part.text))
         if part.HasField('file'):
@@ -458,20 +458,20 @@ class FromProto:
         raise ValueError(f'Unsupported part type: {part}')
 
     @classmethod
-    def data(cls, data: a2a_pb2.DataPart) -> dict[str, Any]:
+#     def data(cls, data: a2a_pb2.DataPart) -> dict[str, Any]:
         json_data = json_format.MessageToJson(data.data)
         return json.loads(json_data)
 
     @classmethod
     def file(
-        cls, file: a2a_pb2.FilePart
+#         cls, file: a2a_pb2.FilePart
     ) -> types.FileWithUri | types.FileWithBytes:
         if file.HasField('file_with_uri'):
             return types.FileWithUri(uri=file.file_with_uri)
         return types.FileWithBytes(bytes=file.file_with_bytes.decode('utf-8'))
 
     @classmethod
-    def task(cls, task: a2a_pb2.Task) -> types.Task:
+#     def task(cls, task: a2a_pb2.Task) -> types.Task:
         return types.Task(
             id=task.id,
             contextId=task.context_id,
@@ -481,32 +481,32 @@ class FromProto:
         )
 
     @classmethod
-    def task_status(cls, status: a2a_pb2.TaskStatus) -> types.TaskStatus:
+#     def task_status(cls, status: a2a_pb2.TaskStatus) -> types.TaskStatus:
         return types.TaskStatus(
             state=FromProto.task_state(status.state),
             message=FromProto.message(status.update),
         )
 
     @classmethod
-    def task_state(cls, state: a2a_pb2.TaskState) -> types.TaskState:
+#     def task_state(cls, state: a2a_pb2.TaskState) -> types.TaskState:
         match state:
-            case a2a_pb2.TaskState.TASK_STATE_SUBMITTED:
+#             case a2a_pb2.TaskState.TASK_STATE_SUBMITTED:
                 return types.TaskState.submitted
-            case a2a_pb2.TaskState.TASK_STATE_WORKING:
+#             case a2a_pb2.TaskState.TASK_STATE_WORKING:
                 return types.TaskState.working
-            case a2a_pb2.TaskState.TASK_STATE_COMPLETED:
+#             case a2a_pb2.TaskState.TASK_STATE_COMPLETED:
                 return types.TaskState.completed
-            case a2a_pb2.TaskState.TASK_STATE_CANCELLED:
+#             case a2a_pb2.TaskState.TASK_STATE_CANCELLED:
                 return types.TaskState.canceled
-            case a2a_pb2.TaskState.TASK_STATE_FAILED:
+#             case a2a_pb2.TaskState.TASK_STATE_FAILED:
                 return types.TaskState.failed
-            case a2a_pb2.TaskState.TASK_STATE_INPUT_REQUIRED:
+#             case a2a_pb2.TaskState.TASK_STATE_INPUT_REQUIRED:
                 return types.TaskState.input_required
             case _:
                 return types.TaskState.unknown
 
     @classmethod
-    def artifact(cls, artifact: a2a_pb2.Artifact) -> types.Artifact:
+#     def artifact(cls, artifact: a2a_pb2.Artifact) -> types.Artifact:
         return types.Artifact(
             artifactId=artifact.artifact_id,
             description=artifact.description,
@@ -517,7 +517,7 @@ class FromProto:
 
     @classmethod
     def task_artifact_update_event(
-        cls, event: a2a_pb2.TaskArtifactUpdateEvent
+#         cls, event: a2a_pb2.TaskArtifactUpdateEvent
     ) -> types.TaskArtifactUpdateEvent:
         return types.TaskArtifactUpdateEvent(
             taskId=event.task_id,
@@ -530,7 +530,7 @@ class FromProto:
 
     @classmethod
     def task_status_update_event(
-        cls, event: a2a_pb2.TaskStatusUpdateEvent
+#         cls, event: a2a_pb2.TaskStatusUpdateEvent
     ) -> types.TaskStatusUpdateEvent:
         return types.TaskStatusUpdateEvent(
             taskId=event.task_id,
@@ -542,7 +542,7 @@ class FromProto:
 
     @classmethod
     def push_notification_config(
-        cls, config: a2a_pb2.PushNotificationConfig
+#         cls, config: a2a_pb2.PushNotificationConfig
     ) -> types.PushNotificationConfig:
         return types.PushNotificationConfig(
             id=config.id,
@@ -553,7 +553,7 @@ class FromProto:
 
     @classmethod
     def authentication_info(
-        cls, info: a2a_pb2.AuthenticationInfo
+#         cls, info: a2a_pb2.AuthenticationInfo
     ) -> types.PushNotificationAuthenticationInfo:
         return types.PushNotificationAuthenticationInfo(
             schemes=list(info.schemes),
@@ -562,7 +562,7 @@ class FromProto:
 
     @classmethod
     def message_send_configuration(
-        cls, config: a2a_pb2.SendMessageConfiguration
+#         cls, config: a2a_pb2.SendMessageConfiguration
     ) -> types.MessageSendConfiguration:
         return types.MessageSendConfiguration(
             acceptedOutputModes=list(config.accepted_output_modes),
@@ -575,7 +575,7 @@ class FromProto:
 
     @classmethod
     def message_send_params(
-        cls, request: a2a_pb2.SendMessageRequest
+#         cls, request: a2a_pb2.SendMessageRequest
     ) -> types.MessageSendParams:
         return types.MessageSendParams(
             configuration=cls.message_send_configuration(request.configuration),
@@ -587,14 +587,14 @@ class FromProto:
     def task_id_params(
         cls,
         request: (
-            a2a_pb2.CancelTaskRequest
-            | a2a_pb2.TaskSubscriptionRequest
-            | a2a_pb2.GetTaskPushNotificationConfigRequest
+#             a2a_pb2.CancelTaskRequest
+#             | a2a_pb2.TaskSubscriptionRequest
+#             | a2a_pb2.GetTaskPushNotificationConfigRequest
         ),
     ) -> types.TaskIdParams:
         # This is currently incomplete until the core sdk supports multiple
         # configs for a single task.
-        if isinstance(request, a2a_pb2.GetTaskPushNotificationConfigRequest):
+#         if isinstance(request, a2a_pb2.GetTaskPushNotificationConfigRequest):
             m = re.match(_TASK_PUSH_CONFIG_NAME_MATCH, request.name)
             if not m:
                 raise ServerError(
@@ -615,7 +615,7 @@ class FromProto:
     @classmethod
     def task_push_notification_config(
         cls,
-        request: a2a_pb2.CreateTaskPushNotificationConfigRequest,
+#         request: a2a_pb2.CreateTaskPushNotificationConfigRequest,
     ) -> types.TaskPushNotificationConfig:
         m = re.match(_TASK_NAME_MATCH, request.parent)
         if not m:
@@ -634,7 +634,7 @@ class FromProto:
     @classmethod
     def agent_card(
         cls,
-        card: a2a_pb2.AgentCard,
+#         card: a2a_pb2.AgentCard,
     ) -> types.AgentCard:
         return types.AgentCard(
             capabilities=cls.capabilities(card.capabilities),
@@ -655,7 +655,7 @@ class FromProto:
     @classmethod
     def task_query_params(
         cls,
-        request: a2a_pb2.GetTaskRequest,
+#         request: a2a_pb2.GetTaskRequest,
     ) -> types.TaskQueryParams:
         m = re.match(_TASK_NAME_MATCH, request.name)
         if not m:
@@ -674,7 +674,7 @@ class FromProto:
 
     @classmethod
     def capabilities(
-        cls, capabilities: a2a_pb2.AgentCapabilities
+#         cls, capabilities: a2a_pb2.AgentCapabilities
     ) -> types.AgentCapabilities:
         return types.AgentCapabilities(
             streaming=capabilities.streaming,
@@ -684,7 +684,7 @@ class FromProto:
     @classmethod
     def security(
         cls,
-        security: list[a2a_pb2.Security] | None,
+#         security: list[a2a_pb2.Security] | None,
     ) -> list[dict[str, list[str]]] | None:
         if not security:
             return None
@@ -695,7 +695,7 @@ class FromProto:
 
     @classmethod
     def provider(
-        cls, provider: a2a_pb2.AgentProvider | None
+#         cls, provider: a2a_pb2.AgentProvider | None
     ) -> types.AgentProvider | None:
         if not provider:
             return None
@@ -706,14 +706,14 @@ class FromProto:
 
     @classmethod
     def security_schemes(
-        cls, schemes: dict[str, a2a_pb2.SecurityScheme]
+#         cls, schemes: dict[str, a2a_pb2.SecurityScheme]
     ) -> dict[str, types.SecurityScheme]:
         return {k: cls.security_scheme(v) for (k, v) in schemes.items()}
 
     @classmethod
     def security_scheme(
         cls,
-        scheme: a2a_pb2.SecurityScheme,
+#         scheme: a2a_pb2.SecurityScheme,
     ) -> types.SecurityScheme:
         if scheme.HasField('api_key_security_scheme'):
             return types.SecurityScheme(
@@ -746,7 +746,7 @@ class FromProto:
         )
 
     @classmethod
-    def oauth2_flows(cls, flows: a2a_pb2.OAuthFlows) -> types.OAuthFlows:
+#     def oauth2_flows(cls, flows: a2a_pb2.OAuthFlows) -> types.OAuthFlows:
         if flows.HasField('authorization_code'):
             return types.OAuthFlows(
                 authorizationCode=types.AuthorizationCodeOAuthFlow(
@@ -781,7 +781,7 @@ class FromProto:
         )
 
     @classmethod
-    def skill(cls, skill: a2a_pb2.AgentSkill) -> types.AgentSkill:
+#     def skill(cls, skill: a2a_pb2.AgentSkill) -> types.AgentSkill:
         return types.AgentSkill(
             id=skill.id,
             name=skill.name,
@@ -793,11 +793,11 @@ class FromProto:
         )
 
     @classmethod
-    def role(cls, role: a2a_pb2.Role) -> types.Role:
+#     def role(cls, role: a2a_pb2.Role) -> types.Role:
         match role:
-            case a2a_pb2.Role.ROLE_USER:
+#             case a2a_pb2.Role.ROLE_USER:
                 return types.Role.user
-            case a2a_pb2.Role.ROLE_AGENT:
+#             case a2a_pb2.Role.ROLE_AGENT:
                 return types.Role.agent
             case _:
                 return types.Role.agent

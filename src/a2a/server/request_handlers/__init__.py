@@ -3,7 +3,7 @@
 from a2a.server.request_handlers.default_request_handler import (
     DefaultRequestHandler,
 )
-from a2a.server.request_handlers.grpc_handler import GrpcHandler
+# from a2a.server.request_handlers.grpc_handler import GrpcHandler
 from a2a.server.request_handlers.jsonrpc_handler import JSONRPCHandler
 from a2a.server.request_handlers.request_handler import RequestHandler
 from a2a.server.request_handlers.response_helpers import (
@@ -14,7 +14,7 @@ from a2a.server.request_handlers.response_helpers import (
 
 __all__ = [
     'DefaultRequestHandler',
-    'GrpcHandler',
+#     'GrpcHandler',
     'JSONRPCHandler',
     'RequestHandler',
     'build_error_response',

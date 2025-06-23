@@ -7,11 +7,11 @@ from collections.abc import AsyncIterable
 
 # import grpc
 
-import a2a.grpc.a2a_pb2_grpc as a2a_grpc
+# import a2a.grpc.a2a_pb2_grpc as a2a_grpc
 
 from a2a import types
 from a2a.auth.user import UnauthenticatedUser
-from a2a.grpc import a2a_pb2
+# from a2a.grpc import a2a_pb2
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers.request_handler import RequestHandler
 from a2a.types import (
@@ -48,7 +48,7 @@ class DefaultCallContextBuilder(CallContextBuilder):
         return ServerCallContext(user=user, state=state)
 
 
-class GrpcHandler(a2a_grpc.A2AServiceServicer):
+# class GrpcHandler(a2a_grpc.A2AServiceServicer):
     """Maps incoming gRPC requests to the appropriate request handler method."""
 
     def __init__(
@@ -57,7 +57,7 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
         request_handler: RequestHandler,
         context_builder: CallContextBuilder | None = None,
     ):
-        """Initializes the GrpcHandler.
+#         """Initializes the GrpcHandler.
 
         Args:
             agent_card: The AgentCard describing the agent's capabilities.
@@ -72,9 +72,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
 
     async def SendMessage(
         self,
-        request: a2a_pb2.SendMessageRequest,
+#         request: a2a_pb2.SendMessageRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.SendMessageResponse:
+#     ) -> a2a_pb2.SendMessageResponse:
         """Handles the 'SendMessage' gRPC method.
 
         Args:
@@ -99,7 +99,7 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
             return proto_utils.ToProto.task_or_message(task_or_message)
         except ServerError as e:
             await self.abort_context(e, context)
-        return a2a_pb2.SendMessageResponse()
+#         return a2a_pb2.SendMessageResponse()
 
     @validate_async_generator(
         lambda self: self.agent_card.capabilities.streaming,
@@ -107,9 +107,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
     )
     async def SendStreamingMessage(
         self,
-        request: a2a_pb2.SendMessageRequest,
+#         request: a2a_pb2.SendMessageRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterable[a2a_pb2.StreamResponse]:
+#     ) -> AsyncIterable[a2a_pb2.StreamResponse]:
         """Handles the 'StreamMessage' gRPC method.
 
         Yields response objects as they are produced by the underlying handler's
@@ -140,9 +140,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
 
     async def CancelTask(
         self,
-        request: a2a_pb2.CancelTaskRequest,
+#         request: a2a_pb2.CancelTaskRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.Task:
+#     ) -> a2a_pb2.Task:
         """Handles the 'CancelTask' gRPC method.
 
         Args:
@@ -165,7 +165,7 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
             )
         except ServerError as e:
             await self.abort_context(e, context)
-        return a2a_pb2.Task()
+#         return a2a_pb2.Task()
 
     @validate_async_generator(
         lambda self: self.agent_card.capabilities.streaming,
@@ -173,9 +173,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
     )
     async def TaskSubscription(
         self,
-        request: a2a_pb2.TaskSubscriptionRequest,
+#         request: a2a_pb2.TaskSubscriptionRequest,
         context: grpc.aio.ServicerContext,
-    ) -> AsyncIterable[a2a_pb2.StreamResponse]:
+#     ) -> AsyncIterable[a2a_pb2.StreamResponse]:
         """Handles the 'TaskSubscription' gRPC method.
 
         Yields response objects as they are produced by the underlying handler's
@@ -200,9 +200,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
 
     async def GetTaskPushNotificationConfig(
         self,
-        request: a2a_pb2.GetTaskPushNotificationConfigRequest,
+#         request: a2a_pb2.GetTaskPushNotificationConfigRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.TaskPushNotificationConfig:
+#     ) -> a2a_pb2.TaskPushNotificationConfig:
         """Handles the 'GetTaskPushNotificationConfig' gRPC method.
 
         Args:
@@ -223,7 +223,7 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
             return proto_utils.ToProto.task_push_notification_config(config)
         except ServerError as e:
             await self.abort_context(e, context)
-        return a2a_pb2.TaskPushNotificationConfig()
+#         return a2a_pb2.TaskPushNotificationConfig()
 
     @validate(
         lambda self: self.agent_card.capabilities.pushNotifications,
@@ -231,9 +231,9 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
     )
     async def CreateTaskPushNotificationConfig(
         self,
-        request: a2a_pb2.CreateTaskPushNotificationConfigRequest,
+#         request: a2a_pb2.CreateTaskPushNotificationConfigRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.TaskPushNotificationConfig:
+#     ) -> a2a_pb2.TaskPushNotificationConfig:
         """Handles the 'CreateTaskPushNotificationConfig' gRPC method.
 
         Requires the agent to support push notifications.
@@ -262,13 +262,13 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
             return proto_utils.ToProto.task_push_notification_config(config)
         except ServerError as e:
             await self.abort_context(e, context)
-        return a2a_pb2.TaskPushNotificationConfig()
+#         return a2a_pb2.TaskPushNotificationConfig()
 
     async def GetTask(
         self,
-        request: a2a_pb2.GetTaskRequest,
+#         request: a2a_pb2.GetTaskRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.Task:
+#     ) -> a2a_pb2.Task:
         """Handles the 'GetTask' gRPC method.
 
         Args:
@@ -290,13 +290,13 @@ class GrpcHandler(a2a_grpc.A2AServiceServicer):
             )
         except ServerError as e:
             await self.abort_context(e, context)
-        return a2a_pb2.Task()
+#         return a2a_pb2.Task()
 
     async def GetAgentCard(
         self,
-        request: a2a_pb2.GetAgentCardRequest,
+#         request: a2a_pb2.GetAgentCardRequest,
         context: grpc.aio.ServicerContext,
-    ) -> a2a_pb2.AgentCard:
+#     ) -> a2a_pb2.AgentCard:
         """Get the agent card for the agent served."""
         return proto_utils.ToProto.agent_card(self.agent_card)
 
