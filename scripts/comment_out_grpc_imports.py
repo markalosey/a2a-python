@@ -28,6 +28,14 @@ grpc_patterns = [
     r'import grpc',
     r'from a2a\\.grpc',
     r'import google\\.protobuf',
+    r'from a2a\.client\.grpc_client import A2AGrpcClient',
+    r'A2AGrpcClient',
+    r'from a2a\.grpc import a2a_pb2',
+    r'from a2a\.grpc import a2a_pb2_grpc',
+    r'a2a_pb2',
+    r'a2a_pb2_grpc',
+    r'from a2a\.server\.request_handlers\.grpc_handler import GrpcHandler',
+    r'GrpcHandler',
 ]
 req_patterns = [r'grpcio', r'protobuf']
 
