@@ -1,0 +1,43 @@
+name: Auto-merge main to staging and comment out grpc/protobuf
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  merge-and-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch all branches
+        run: git fetch --all
+
+      - name: Checkout staging branch
+        run: git checkout staging
+
+      - name: Merge main into staging
+        run: git merge origin/main --no-edit
+
+      - name: Comment out grpc/protobuf imports and requirements
+        run: |
+          python3 scripts/comment_out_grpc_imports.py
+
+      - name: Commit and push changes if needed
+        run: |
+          if ! git diff --quiet; then
+            git add .
+            git commit -m "chore: comment out grpc/protobuf after merging main"
+            git push origin staging
+          else
+            echo "No changes to commit." 
