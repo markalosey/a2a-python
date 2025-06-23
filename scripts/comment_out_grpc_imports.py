@@ -49,3 +49,16 @@ for pyfile in Path('tests').rglob('*.py'):
 comment_out_in_file('pyproject.toml', req_patterns)
 if Path('requirements.txt').exists():
     comment_out_in_file('requirements.txt', req_patterns)
+
+# Comment out all code in src/a2a/grpc/*.py
+grpc_dir = Path('src/a2a/grpc')
+if grpc_dir.exists():
+    for grpc_file in grpc_dir.glob('*.py'):
+        with open(grpc_file) as f:
+            lines = f.readlines()
+        with open(grpc_file, 'w') as f:
+            for line in lines:
+                if not line.strip().startswith('#'):
+                    f.write('# ' + line)
+                else:
+                    f.write(line)
